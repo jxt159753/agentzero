@@ -1,0 +1,13 @@
+# Add after compose.yaml. Requires Docker Compose 2.24.4+ for !override.
+# PUBLIC_HOST must include :8443; TLS_SERVER_NAME is the certificate's bare IP.
+services:
+  proxy:
+    image: caddy:2.11.9
+    environment:
+      TLS_SERVER_NAME: ${TLS_SERVER_NAME:?Set TLS_SERVER_NAME to the certificate IP}
+    ports: !override
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile.ip:/etc/caddy/Caddyfile:ro
+      # Mount the directory so atomic certificate file replacements remain visible.
+      - /opt/agentzero-secrets/tls:/certs:ro

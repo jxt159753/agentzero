@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>星光老虎机 · Starlight Arcade</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <main class="cabinet" aria-labelledby="title">
+      <header class="masthead">
+        <span class="brand"><span class="brand-mark" aria-hidden="true">✦</span> STARLIGHT <span class="brand-sub">ARCADE</span></span>
+        <span class="mode" id="mode">连接中</span>
+      </header>
+      <section class="intro">
+        <p class="eyebrow">A LITTLE SPARK OF LUCK</p>
+        <h1 id="title">星光<span>老虎机</span><i aria-hidden="true">✧</i></h1>
+        <p class="tagline">把此刻的星光，转成一份小惊喜。</p>
+      </section>
+      <section class="machine" aria-label="三轴老虎机">
+        <div class="machine-top"><span><i class="indicator" aria-hidden="true"></i><span id="machine-label">等待游戏机</span></span><span>NO. 001</span></div>
+        <div class="reels" id="reels" aria-label="星光、月亮、宝石" aria-busy="false">
+          <div class="reel" data-symbol="star"><span class="glyph" aria-hidden="true">✦</span><span class="symbol-name">星光</span></div>
+          <div class="reel" data-symbol="moon"><span class="glyph" aria-hidden="true">☾</span><span class="symbol-name">月亮</span></div>
+          <div class="reel" data-symbol="gem"><span class="glyph" aria-hidden="true">◆</span><span class="symbol-name">宝石</span></div>
+          <span class="payline" aria-hidden="true"></span>
+        </div>
+        <div class="machine-foot"><span>三枚符号 · 一个小宇宙</span><span class="lights" aria-hidden="true">● ● ●</span></div>
+      </section>
+      <section class="result" aria-live="polite" aria-atomic="true">
+        <div><p id="result-caption">等待连接</p><h2 id="result-title">星光正在就位</h2></div>
+        <div class="reward"><strong id="reward">—</strong><span id="reward-label">预计积分</span></div>
+      </section>
+      <button id="spin" type="button" disabled><span id="button-label">正在连接游戏机…</span><span aria-hidden="true">↗</span></button>
+      <p class="status" id="status" role="status">正在等待宿主初始化。</p>
+      <section class="rules" aria-label="奖励规则">
+        <div><span class="rule-symbols" aria-hidden="true">✦ ✦ ✦</span><span>三枚相同</span><strong>3<small>积分</small></strong></div>
+        <div><span class="rule-symbols pair" aria-hidden="true">☾ ☾ ◆</span><span>两枚相同</span><strong>1<small>积分</small></strong></div>
+        <div><span class="rule-symbols mixed" aria-hidden="true">✦ ☾ ◆</span><span>三枚不同</span><strong>0<small>积分</small></strong></div>
+      </section>
+      <footer>
+        <span id="fee">试玩不扣积分</span><span>✧</span><span id="settlement-label">等待连接平台</span>
+      </footer>
+      <details class="verification">
+        <summary>本局与公开规则</summary>
+        <p>正式对局由服务端生成的对局编号确定结果，每局仅转动一次。启用自动规则时，平台独立核验并自动派奖；中途关闭的对局也会到期结算。结算后可在游戏窗口下方直接开始下一局。</p>
+        <p>规则：SHA-256("agentzero-starlight-slots-v1:" + 对局编号)，前三个字节分别取模 3，依次对应星光、月亮、宝石。三同为 100 分 / 3 积分，两同为 20 分 / 1 积分，三异为 0 分 / 0 积分。</p>
+        <dl><dt>模式 / 对局</dt><dd id="session-label">等待连接</dd><dt>结果摘要</dt><dd id="digest-label">尚未转动</dd></dl>
+        <p>转动动画不参与结果计算。浏览器显示的奖励为申请值，最终入账以平台结算记录为准。</p>
+      </details>
+    </main>
+  </body>
+</html>

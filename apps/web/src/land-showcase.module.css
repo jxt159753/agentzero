@@ -1,0 +1,27 @@
+.showcase { display:grid; gap:16px; min-width:0; color:#405d36; }
+.item { min-width:0; overflow-wrap:anywhere; }
+.item + .item { padding-top:16px; border-top:1px solid #dde5d4; }
+.item h3 { margin:0 0 8px; font-size:15px; line-height:1.5; }
+.text { margin:0; white-space:pre-wrap; line-height:1.8; font-size:13px; }
+.item img,.item video { display:block; width:100%; max-height:360px; object-fit:contain; border-radius:7px; background:#e8eddf; }
+.webViewport { position:relative; width:100%; height:420px; min-height:120px; overflow:hidden; clip-path:inset(0 round 7px); border:1px solid #d9e2ce; border-radius:7px; background:white; }
+.webViewport iframe { position:absolute; top:0; left:0; display:block; width:1024px; height:640px; border:0; background:white; transform-origin:top left; }
+.webPreview { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; padding:7px 0; font-size:12px; }
+.webPreview span { min-width:0; overflow-wrap:anywhere; }
+.webActions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.openWeb { display:inline-block; padding:5px 0; color:#526f42; font-size:11px; text-decoration:underline; }
+.previewToggle { padding:5px 0; background:transparent; color:#627755; font-size:11px; text-decoration:underline; }
+.hint { color:#7b896f; font-size:11px; line-height:1.6; margin:8px 0; }
+.source { display:inline-block; margin-top:8px; font-size:12px; color:#526f42; }
+.compact { display:flex; flex-direction:column; min-height:0; gap:10px; }
+.compact > .item { display:flex; flex-direction:column; min-height:0; overflow:auto; }
+.compact > .item > :not(.webViewport) { flex-shrink:0; }
+.compact .item img,.compact .item video { max-height:260px; }
+.compact .webViewport { height:300px; min-height:80px; flex:0 1 300px; }
+.compact .webHint { display:none; }
+.compact .text { font-size:12px; }
+.compact .item h3 { font-size:13px; }
+.pagination { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:12px; border-top:1px solid #dce4d2; padding-top:8px; font-size:11px; }
+.pagination button { padding:4px 12px; min-height:30px; background:#eaf0e1; color:#49643d; border:1px solid #d2dec5; }
+.pagination button:disabled { opacity:.4; }
+@media(max-width:480px) { .webViewport { height:300px; }.compact .webViewport { height:240px; flex-basis:240px; } }

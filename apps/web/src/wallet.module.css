@@ -1,0 +1,7 @@
+.balance { margin-bottom:24px; }
+.balance strong { overflow-wrap:anywhere; }
+.balance small { overflow-wrap:anywhere; }
+.fields { border:0; padding:0; margin:0; min-width:0; }
+.summary { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:14px 16px; background:#f1f6e9; border-radius:8px; color:var(--ink); overflow-wrap:anywhere; }
+.summary strong { margin-left:auto; }
+.transactions { min-width:560px; }

@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+!apps/web/dist
+!apps/web/dist/**
+.local
+**/.env
+**/.env.*
+.git
+playwright-report
+test-results
+**/*.pem

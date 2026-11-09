@@ -1,0 +1,9 @@
+{
+  auto_https off
+  default_sni {$TLS_SERVER_NAME}
+}
+
+https://{$PUBLIC_HOST} {
+  tls /certs/current/fullchain.pem /certs/current/privkey.pem
+  reverse_proxy api:3000
+}

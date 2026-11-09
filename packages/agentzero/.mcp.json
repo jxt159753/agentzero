@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agentzero": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/dist/index.cjs"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

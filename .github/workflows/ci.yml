@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Verify the distributable AgentZero plugin
+        run: pnpm test:plugin
+
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci-postgres-only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # These fixed credentials exist only in this job's disposable PostgreSQL service.
+    # No production GitHub App, Agent or database credentials are used in CI.
+    env:
+      DATABASE_URL: postgresql://agentzero_app:local-app-only@127.0.0.1:55432/agentzero_dev
+      TEST_DATABASE_URL: postgresql://agentzero_app:local-app-only@127.0.0.1:55432/agentzero_test
+      TEST_MIGRATION_DATABASE_URL: postgresql://agentzero_migrator:local-migration-only@127.0.0.1:55432/agentzero_test
+      MIGRATION_DATABASE_URL: postgresql://agentzero_migrator:local-migration-only@127.0.0.1:55432/agentzero_test
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.local/playwright
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create isolated databases and separate runtime/migration roles
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: docker exec -i "$POSTGRES_CONTAINER_ID" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < deploy/bootstrap.sql
+      - name: Apply migrations to the test database
+        run: pnpm db:migrate
+      - run: pnpm test:integration
+      - run: pnpm --filter @agentzero/web build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Browser UI contract tests
+        run: pnpm test:e2e
+      # The live tests reuse the test database only after integration tests finish.
+      - name: Browser tests against the real API and test database
+        run: pnpm test:e2e:live

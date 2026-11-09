@@ -1,0 +1,32 @@
+.grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin-bottom:24px; }
+.offer { display:flex; flex-direction:column; min-width:0; margin:0; }
+.offer h3 { font-size:19px; margin:0 0 9px; overflow-wrap:anywhere; }
+.offer p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.offerFooter { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:auto; padding-top:18px; }
+.price { display:block; font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.price small { font-size:11px; color:var(--muted); margin-left:6px; font-weight:400; }
+.steps { margin:0 0 20px; padding-left:20px; color:#667a5b; line-height:2; font-size:12px; }
+.receiptList { display:grid; gap:12px; margin:18px 0; }
+.receipt { display:block; border:1px solid var(--line); border-radius:9px; padding:18px; min-width:0; color:var(--ink); overflow-wrap:anywhere; }
+.receipt:hover { text-decoration:none; border-color:#a8be96; }
+.receipt h2,.receiptCard h2 { min-width:0; overflow-wrap:anywhere; }
+.receiptHeading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.receiptHeading strong { font-size:14px; }
+.receipt small { color:var(--muted); font-size:11px; }
+.code { display:block; font-family:Consolas,monospace; font-size:14px; background:#f5f8ef; padding:14px; border:1px solid #dce6d0; border-radius:7px; overflow-wrap:anywhere; margin:14px 0; }
+.details { border-top:1px solid var(--line); padding-top:18px; margin-top:18px; }
+.details summary { cursor:pointer; font-weight:600; font-size:12px; }
+.details form { margin-top:15px; }
+.checkbox { display:flex; gap:9px; align-items:flex-start; font-size:12px; line-height:1.8; margin:17px 0; color:#5f7454; }
+.checkbox input { width:16px; height:16px; padding:0; flex-shrink:0; margin:3px 0 0; }
+.text { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:#53654b; }
+.monthPicker { flex-wrap:wrap; }
+.adminOffer { border-top:1px solid var(--line); padding:18px 0; }
+.adminOffer:first-of-type { border-top:0; }
+.state { display:inline-block; padding:4px 9px; border-radius:5px; font-size:11px; white-space:nowrap; background:#f0f1ed; color:#697c5e; }
+.pending { background:#fff2d8; color:#8b6e2a; }
+.processing { background:#eaf0fa; color:#4a6594; }
+.fulfilled { background:#e5f2ed; color:#2a745c; }
+.cancelled { background:#f0f1ed; color:#818b78; }
+@media(max-width:900px) { .grid { grid-template-columns:1fr; } }
+@media(max-width:760px) { .offerFooter { align-items:flex-start; } .code { font-size:12px; } }

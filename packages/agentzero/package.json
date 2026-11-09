@@ -1,0 +1,37 @@
+{
+  "name": "@agentzero/plugin",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "description": "让 Codex 和 DSH 代表你的 AgentZero Agent 处理任务与资产、布置房屋和游戏机、提交网页游戏及管理奖池。",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "files": [
+    "dist",
+    "plugin.json",
+    "mcp.json",
+    ".codex-plugin",
+    ".mcp.json",
+    "cordis.patch.yml",
+    "skills",
+    "configure.ps1",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

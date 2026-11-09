@@ -1,0 +1,92 @@
+.town { position:relative; height:100%; min-height:0; overflow:hidden; background:#e5edcf; isolation:isolate; }
+.mapCard { position:absolute; inset:0; }
+.map { height:100%; width:100%; position:relative; overflow:hidden; touch-action:none; outline:none; }
+.map canvas { display:block; width:100%; height:100%; }
+.map[data-pointer-locked="true"],.map[data-pointer-locked="true"] * { cursor:none !important; }
+.sceneLabels { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.sceneLabel { position:absolute; top:0; left:0; padding:4px 8px; border:1px solid #d4ddc4d9; border-radius:5px; color:#526248; background:#fffdf0e8; box-shadow:0 2px 8px #435b3610; font-size:10px; line-height:1.3; white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+.sceneLabel[hidden] { display:none; }
+.sceneLabel.sceneSpeech { z-index:1; max-width:240px; white-space:normal; padding:8px 12px; border-radius:12px 12px 12px 2px; color:#385846; background:#fffef4f5; font-size:11px; box-shadow:0 4px 14px #3f5c3420; }
+.sceneNearby { position:absolute; top:182px; right:30px; display:grid; gap:6px; width:190px; padding:12px; border:1px solid #d4ddc4; border-radius:10px; background:#fffdf2f2; color:#49633f; box-shadow:0 3px 12px #4a623310; }
+.sceneNearby strong { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.sceneNearby span { font-size:10px; color:#74836a; }.sceneNearby button { padding:7px 10px; font-size:11px; border-radius:6px; background:#567452; color:#fffdf2; }
+.sceneLandShowcase { position:absolute; z-index:3; top:0; left:0; visibility:hidden; width:520px; max-width:calc(100% - 16px); display:flex; flex-direction:column; min-height:0; min-width:0; padding:14px; border:1px solid #d4ddc4; border-radius:16px; background:#fffdf4; color:#49633f; box-shadow:0 5px 18px #3d583c25; overscroll-behavior:contain; touch-action:pan-y; }
+.sceneLandShowcase[hidden] { display:none; }
+.sceneLandShowcase[data-view="overview"] { width:max-content; max-width:min(220px,calc(100% - 16px)); padding:0; border-radius:9px; }
+.showcaseOpen { display:grid; gap:3px; max-width:100%; padding:7px 12px; color:#49633f; background:transparent; text-align:left; }
+.showcaseOpen strong { font-size:12px; overflow:hidden; text-overflow:ellipsis; }.showcaseOpen span { font-size:10px; }
+.showcaseOpen:hover:not(:disabled) { background:#eaf0e1; }
+.sceneLandShowcase::after { content:''; position:absolute; left:var(--tail-x,50%); top:100%; transform:translateX(-50%); border-left:9px solid transparent; border-right:9px solid transparent; border-top:12px solid #fffdf4; filter:drop-shadow(0 1px 0 #d4ddc4); pointer-events:none; }
+.sceneLandShowcase:focus-visible { outline:2px solid #567452; outline-offset:-2px; }
+.showcaseHeading { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; margin-bottom:9px; overflow-wrap:anywhere; flex-shrink:0; }
+.showcaseHeading > span { grid-column:1 / -1; }.showcaseHeading small { align-self:center; max-width:180px; }
+.showcaseHeading > span { font-size:10px; color:#74836a; letter-spacing:1px; }.showcaseHeading strong { font-size:15px; }.showcaseHeading small { font-size:10px; color:#74836a; }
+.showcaseHint { margin:0 0 10px; color:#6a795c; font-size:11px; flex-shrink:0; }
+.showcaseVisit { margin-top:12px; background:transparent; color:#49633f; font-size:11px; padding:6px 0; flex-shrink:0; text-align:left; }
+@media(max-width:480px) { .sceneLandShowcase { width:calc(100% - 24px); padding:10px; } }
+.sceneViewModes { position:absolute; right:30px; top:85px; display:flex; gap:3px; padding:4px; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:9px; box-shadow:0 3px 12px #4a623310; }
+.sceneViewModes button { padding:6px 10px; color:#607254; background:transparent; border-radius:6px; font-size:11px; }.sceneViewModes button[aria-pressed="true"] { color:#f7f9ed; background:#567452; }
+.sceneCompass { position:absolute; right:30px; top:130px; display:flex; align-items:center; gap:2px; padding:4px; border:1px solid #d4ddc4; border-radius:8px; background:#fffdf2ed; box-shadow:0 3px 12px #4a623310; }
+.sceneCompass button { background:transparent; color:#5e7554; padding:4px 7px; font-size:20px; line-height:1; }.sceneCompass button:hover { background:#eaf0dc; }.sceneCompass span { color:#839175; font-size:10px; letter-spacing:1px; }
+.sceneRoam { position:absolute; top:130px; right:30px; padding:9px 15px; color:#49633f; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:8px; font-size:11px; }
+.sceneCrosshair { position:absolute; left:50%; top:50%; width:11px; height:11px; transform:translate(-50%,-50%); border:1px solid #fffef4d9; border-radius:50%; box-shadow:0 0 0 1px #344e4080; pointer-events:none; }.sceneCrosshair::after { content:''; position:absolute; width:3px; height:3px; left:3px; top:3px; background:#fffef4; border-radius:50%; }
+.sceneWalkHelp { position:absolute; left:30px; bottom:110px; padding:7px 10px; max-width:calc(100% - 60px); border-radius:6px; background:#fffdf2db; color:#657456; font-size:10px; line-height:1.5; pointer-events:none; }
+.sceneTime { position:absolute; top:132px; left:32px; padding:6px 9px; border-radius:6px; color:#607254; background:#fffdf2de; font-size:10px; font-variant-numeric:tabular-nums; pointer-events:none; }
+.town:has(.map[data-day-phase="night"]) .townTitle h1 { color:#e4eada; }
+.town:has(.map[data-day-phase="night"]) .overline,.town:has(.map[data-day-phase="night"]) .titleMeta,.town:has(.map[data-day-phase="night"]) .legend { color:#bccbbb; }
+.sceneCredits { position:absolute; right:30px; bottom:18px; color:#6b7c5a; font-size:9px; background:#f9fbece6; border-radius:4px; padding:3px 5px; text-decoration:none; }
+.sceneTooltip { position:absolute; left:50%; bottom:118px; transform:translateX(-50%); padding:11px 16px; max-width:calc(100% - 32px); background:#fffef5f5; border:1px solid #d6dfc6; border-radius:10px; box-shadow:0 5px 20px #4b623318; text-align:center; pointer-events:none; }
+.sceneTooltip strong,.sceneTooltip span { display:block; }.sceneTooltip strong { color:#435e3f; font-size:12px; }.sceneTooltip span { color:#839274; font-size:10px; margin-top:5px; }
+.sceneTooltip button { pointer-events:auto; margin-top:8px; padding:5px 12px; border-radius:5px; background:#66835c; color:#fffdf2; font-size:10px; }
+@media(max-width:800px) { .sceneViewModes { top:80px; right:18px; }.sceneCompass,.sceneRoam { top:122px; right:18px; }.sceneCredits { right:18px; bottom:17px; font-size:8px; }.sceneLabel { font-size:9px; max-width:100px; padding:3px 5px; }.sceneWalkHelp { left:18px; bottom:198px; max-width:calc(100% - 36px); font-size:9px; } }
+@media(max-width:480px) { .sceneViewModes { top:auto; bottom:112px; left:12px; right:auto; z-index:4; }.sceneCompass,.sceneRoam { top:148px; }.sceneViewModes button { font-size:10px; padding:6px 8px; }.sceneCredits { bottom:15px; right:12px; max-width:175px; }.sceneTooltip { bottom:236px; min-width:180px; }.sceneWalkHelp { left:12px; right:12px; max-width:none; } }
+.map:focus-visible { box-shadow:inset 0 0 0 2px #5c886b; }
+@media(max-width:800px) { .sceneTime { top:123px; left:20px; font-size:9px; padding:5px 7px; } }
+@media(max-width:800px) { .sceneNearby { right:18px; top:174px; width:160px; padding:10px; } }
+@media(max-width:480px) { .sceneNearby { top:197px; right:12px; width:150px; }.sceneLabel.sceneSpeech { max-width:180px; font-size:10px; } }
+.mapOverlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; padding:32px; text-align:center; background:#eaf0dd; }
+.mapOverlay p { color:var(--muted); }
+.townTitle { position:absolute; top:29px; left:32px; pointer-events:none; }
+.overline { font-size:9px; color:#7b8c68; letter-spacing:2.5px; font-weight:700; }
+.townTitle h1 { font-size:26px; font-weight:500; color:#344d38; margin:8px 0 12px; letter-spacing:1px; text-shadow:0 1px 8px #f0f6dc; }
+.townTitle h1 > span { font-size:12px; vertical-align:top; margin-left:12px; color:#95a683; }
+.titleMeta { display:flex; align-items:center; gap:12px; color:#748068; font-size:11px; }
+.status { display:inline-flex; align-items:center; gap:6px; font-size:11px; white-space:nowrap; color:#4f7853; }
+.status::before { content:''; width:6px; height:6px; border-radius:50%; background:#4d925c; }
+.statusWaiting { color:#8d763d; }.statusWaiting::before { background:#b4934c; }
+.directoryToggle { position:absolute; top:30px; right:30px; padding:11px 16px; background:#fffdf2ed; color:#4f664a; border:1px solid #d6ddc6; border-radius:9px; box-shadow:0 4px 18px #56653c0b; font-size:12px; }
+.directoryToggle:hover:not(:disabled) { background:#fffdf4; color:#36513b; }.directoryToggle span { margin-right:8px; font-size:16px; }
+.mapTools { position:absolute; left:30px; bottom:49px; display:flex; align-items:center; gap:3px; padding:6px; border:1px solid #d4ddc4; background:#fffef4ed; border-radius:10px; box-shadow:0 4px 18px #4a62331a; }
+.mapTools button { background:transparent; color:#53644c; padding:7px 10px; font-size:12px; border-radius:6px; }
+.mapTools button:hover:not(:disabled) { background:#eaf0dc; color:#405b3f; }.mapTools > span { color:#8c957e; font-size:10px; min-width:30px; text-align:center; }
+.mapTools .toolDivider { min-width:0; width:1px; height:18px; background:#dce3d0; margin:0 5px; }
+.walkHud { position:absolute; right:150px; bottom:49px; padding:12px 15px; background:#fffdf2e8; border:1px solid #d4ddc4; border-radius:10px; box-shadow:0 4px 18px #4a623310; }
+.walkHud strong,.walkHud span,.walkHud small { display:block; }.walkHud strong { font-size:12px; font-weight:500; color:#486044; }.walkHud span { margin:4px 0; font-size:10px; color:#718065; }.walkHud small { font-size:9px; color:#9a9f8e; }
+.sceneMovement { position:absolute; z-index:3; right:30px; bottom:49px; display:grid; gap:8px; padding:8px; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:10px; box-shadow:0 4px 18px #4a623310; touch-action:none; user-select:none; }
+.movePad { display:grid; grid-template-columns:repeat(3,28px); grid-template-rows:repeat(2,28px); gap:3px; }
+.movePad button { padding:0; background:#eff2e6; color:#687a5e; border:1px solid #dfe5d1; border-radius:4px; font-size:12px; }.movePad button:nth-child(1) { grid-column:2; }.movePad button:nth-child(2) { grid-column:1; }
+.motionActions { display:flex; gap:4px; }.motionActions button { flex:1; padding:7px 2px; border-radius:5px; font-size:10px; color:#526b47; background:#e9efdf; }.motionActions button[aria-pressed="true"] { color:#fffdf2; background:#567452; }
+.legend { position:absolute; bottom:15px; left:32px; display:flex; flex-wrap:wrap; gap:16px; font-size:10px; color:#879575; pointer-events:none; }
+.legend span { display:flex; align-items:center; gap:5px; }.visitorDot,.agentDot { width:6px; height:6px; border-radius:50%; background:#5f88ad; display:inline-block; }.agentDot { background:#bc944f; border-radius:2px; }
+.connectionNotice { position:absolute; top:130px; left:32px; max-width:min(470px,calc(100% - 64px)); background:#fffdf0ee; border:1px solid #dfd9bd; border-radius:9px; padding:12px 14px; display:flex; flex-wrap:wrap; gap:9px; align-items:center; z-index:3; font-size:11px; }
+.connectionNotice button { padding:5px 10px; font-size:11px; }.connectionNotice > span:last-child { color:#8f896f; }
+.directoryDrawer { position:absolute; right:24px; top:82px; bottom:30px; width:350px; max-width:calc(100% - 32px); background:#fffef8f5; backdrop-filter:blur(12px); border:1px solid #d8dfca; border-radius:14px; box-shadow:0 16px 40px #40553320; overflow-y:auto; padding:20px; z-index:4; }
+.drawerHeading,.panelHeader { display:flex; justify-content:space-between; align-items:center; gap:10px; }.drawerHeading { margin-bottom:18px; }.drawerHeading h2 { margin:0; font-size:18px; }.drawerHeading button,.overlayHeading button { padding:0; border:0; background:transparent; color:#75836a; font-size:24px; width:30px; height:30px; }.panelHeader { margin:22px 0 12px; }.panelHeader h2 { font-size:14px; margin:0; }.panelHeader > span { color:#99a08b; font-size:11px; }
+.places { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }.places a { background:#eff3e7; border:1px solid #e0e6d3; border-radius:8px; display:flex; align-items:center; flex-direction:column; gap:5px; padding:10px 3px; font-size:11px; color:#5d7353; }.places a:hover { background:#e4ebd6; text-decoration:none; }.places span { font-size:21px; }.places small { font-size:7px; white-space:nowrap; color:#98a18a; }
+.directoryNote { font-size:11px; line-height:1.8; color:#929b83; margin:15px 0; }
+.landRow { display:flex; gap:10px; border-top:1px solid #e8eddf; padding:14px 0; }.landRow > div { min-width:0; flex:1; }.landRow strong { display:block; font-size:12px; overflow-wrap:anywhere; }.landRow small { display:block; margin-top:4px; color:#8a957e; font-size:10px; overflow-wrap:anywhere; }.rowActions { display:flex; align-items:center; gap:16px; margin-top:9px; font-size:10px; }.rowActions button { background:transparent; color:#657d57; font-size:10px; padding:0; }
+.residentList { list-style:none; margin:0; padding:0; }.residentList li { border-top:1px solid #e8eddf; padding:11px 0; }.resident { display:flex; align-items:center; gap:10px; width:100%; color:var(--ink); text-decoration:none; }.resident:hover { text-decoration:none; color:#47774a; }.residentText { flex:1; min-width:0; }.residentText strong { display:block; font-size:12px; overflow-wrap:anywhere; }.residentText small { display:block; color:#9aa28e; font-size:9px; margin-top:2px; }
+.residentBadge { display:grid; place-items:center; flex-shrink:0; width:31px; height:31px; border-radius:8px; color:#a48640; background:#f4efdd; font-size:15px; }.visitorBadge { background:#e9eff0; color:#678ba5; border-radius:50%; }.onlineLabel { color:#759368; font-size:9px; white-space:nowrap; }.offlineLabel { color:#a2a894; }
+.featureOverlay { position:absolute; z-index:5; inset:22px 28px; background:#fafbf5f5; backdrop-filter:blur(18px); border:1px solid #e2e7d6; border-radius:16px; box-shadow:0 20px 80px #29462725; overflow:auto; scrollbar-gutter:stable; }
+.overlayHeading { display:flex; justify-content:space-between; align-items:center; padding:13px 26px; border-bottom:1px solid #e6eadc; background:#fafcf5f7; position:sticky; top:0; z-index:2; }.overlayHeading a { font-size:12px; color:#7b8b6e; }.overlayContent { padding:27px; max-width:1440px; margin:auto; }
+.panel { border:1px solid var(--line); border-radius:13px; background:#fff; padding:24px; min-width:0; }.panel h2 { margin-bottom:14px; }.panel p { color:#6a7b6e; font-size:12px; line-height:1.8; }.profile { border-top:3px solid #8cab7c; }.profile h2 { margin-bottom:9px; overflow-wrap:anywhere; }.detailLinks { display:flex; flex-wrap:wrap; gap:10px 20px; margin:16px 0; font-size:13px; }.studioPreview { min-height:160px; background:linear-gradient(150deg,#edf2e4,#f9f5e9); border:1px solid #dce5d4; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; padding:16px; margin:20px 0; }.house { font-size:62px; color:#79936a; line-height:1; }.decoration { display:flex; flex-direction:column; align-items:center; color:#647254; font-size:10px; max-width:90px; text-align:center; }.decoration span { font-size:27px; line-height:1.3; }.facts { display:flex; flex-wrap:wrap; gap:8px 18px; color:var(--muted); font-size:12px; }.work { padding:15px 0; border-top:1px solid var(--line); }.work h3 { margin-bottom:6px; }.work p { margin:6px 0; }.work a { overflow-wrap:anywhere; }.footerNote { margin-top:18px; font-size:9px; color:#99a38c; }
+@media(max-width:800px) { .townTitle { top:22px; left:20px; }.townTitle h1 { font-size:21px; }.overline { font-size:8px; letter-spacing:1.4px; }.directoryToggle { top:22px; right:18px; padding:9px 10px; }.directoryToggle span { display:none; }.titleMeta { gap:8px; font-size:9px; }.walkHud { display:none; }.sceneMovement { right:18px; bottom:53px; }.sceneMovement .movePad { grid-template-columns:repeat(3,36px); grid-template-rows:repeat(2,36px); }.motionActions button { padding:8px 3px; font-size:11px; }.mapTools { left:18px; bottom:54px; }.mapTools button { padding:6px 8px; font-size:11px; }.legend { left:20px; right:20px; gap:8px 15px; bottom:15px; font-size:9px; }.directoryDrawer { right:16px; bottom:16px; top:76px; }.featureOverlay { inset:12px; border-radius:12px; }.overlayContent { padding:18px; }.overlayHeading { padding:10px 18px; }.connectionNotice { left:20px; top:118px; max-width:calc(100% - 40px); }.panel { padding:18px; } }
+@media(max-width:480px) { .townTitle h1 { font-size:19px; }.townTitle h1 > span { display:none; }.titleMeta > span:last-child:not(.status) { display:none; }.directoryToggle { font-size:10px; }.mapTools { gap:0; left:12px; }.mapTools button { padding:6px; font-size:10px; }.mapTools > span { min-width:27px; font-size:9px; }.mapTools .toolDivider { margin:0 3px; }.sceneMovement { right:12px; bottom:54px; }.featureOverlay { inset:8px; }.overlayContent { padding:14px; }.overlayHeading { padding:8px 14px; }.panel { padding:14px; }.detailLinks { font-size:12px; gap:10px; }.legend span:last-child { display:none; } }
+.sceneDoor { position:absolute; left:50%; bottom:112px; transform:translateX(-50%); z-index:3; display:flex; align-items:center; gap:12px; padding:10px 14px; border:1px solid #dce4d0; border-radius:12px; background:#fffef3f5; font-size:12px; }
+.sceneArcade { position:absolute; left:0; top:0; z-index:4; width:300px; max-width:calc(100% - 16px); padding:13px; border:1px solid #d4dec7; border-radius:16px; background:#fffef8f5; box-shadow:0 12px 32px #304b4329; }
+.sceneArcade[hidden] { display:none; }
+.sceneArcade::after { content:''; position:absolute; bottom:-9px; left:calc(50% - 8px); width:16px; height:16px; transform:rotate(45deg); background:#fffef8; border-right:1px solid #d4dec7; border-bottom:1px solid #d4dec7; }
+.gamesToggle { position:absolute; top:30px; right:276px; z-index:2; padding:9px 12px; font-size:12px; }
+
+@media(max-width:800px) { .gamesToggle { top:65px; right:18px; padding:6px 10px; font-size:10px; } .sceneDoor { max-width:calc(100% - 24px); bottom:245px; } }
+
+@media(max-width:480px) { .gamesToggle { right:96px; } }

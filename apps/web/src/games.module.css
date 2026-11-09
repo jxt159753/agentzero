@@ -1,0 +1,27 @@
+.library { max-width:1100px; margin:auto; color:#344d38; }
+.heading { display:flex; align-items:center; justify-content:space-between; gap:18px; margin:10px 0 25px; }
+.heading h1 { margin:4px 0 8px; }.heading p,.hint { font-size:12px; line-height:1.8; color:#73816a; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:18px; margin:20px 0; }
+.card { padding:22px; background:#fff; border:1px solid #dce4d2; border-radius:14px; min-width:0; }
+.card h2,.card h3 { margin-bottom:12px; }.card p { font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:12px 0; }.row > label { flex:1; min-width:150px; }.row button { padding:9px 14px; }
+.numbers { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:12px; padding:12px 0; color:#62764d; }
+.badge { display:inline-block; font-size:11px; border-radius:12px; padding:3px 9px; background:#edf2e5; color:#587444; }
+.machine { width:100%; min-width:0; }.machine h3 { margin:0 0 8px; }.machine p { font-size:12px; line-height:1.6; }
+.preview { width:100%; height:175px; border:0; background:#14261e; border-radius:9px; display:block; margin:12px 0; }
+.veil { position:fixed; inset:0; background:#10231bd9; z-index:200; display:flex; align-items:center; justify-content:center; padding:24px; }
+.player { display:flex; flex-direction:column; background:#f7f9f2; color:#344d38; border:1px solid #a5b69a; border-radius:18px; width:min(100%,1000px); max-height:95dvh; overflow:auto; box-shadow:0 25px 80px #0005; padding:22px; }
+.player header { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:16px; flex-shrink:0; }.player header h2 { margin:0; font-size:20px; overflow-wrap:anywhere; }.player header button { padding:7px 12px; min-height:40px; }
+.controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }.player header .controls { flex-wrap:nowrap; flex-shrink:0; }
+.playfield { min-height:0; }.sessionStatus { display:flex; align-items:center; flex-wrap:wrap; gap:6px 16px; padding:10px 12px; margin-top:10px; background:#e9efe1; border:1px solid #d2dec5; border-radius:8px; font-size:12px; line-height:1.6; flex-shrink:0; }.sessionStatus button { margin-left:auto; }
+.finalStatus { background:#dcefdc; color:#234e2e; border-color:#8cb891; }.finalStatus strong { font-size:14px; }
+.sessionInfo { font-size:11px; margin-top:8px; flex-shrink:0; }.sessionInfo summary { cursor:pointer; color:#62764d; }.sessionInfo p { margin-bottom:0; }
+.nextRound { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin-top:10px; flex-shrink:0; }.nextRound > span { font-size:11px; color:#62764d; }.nextRound button { min-height:44px; }
+.screen { width:100%; height:min(60vh,560px); border:1px solid #b1c0a4; background:#14261e; border-radius:10px; display:block; }
+.player.fullscreen,.player:fullscreen { position:fixed; inset:0; width:100%; height:100dvh; max-height:none; border:0; border-radius:0; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); }
+.fullscreen .playfield,.player:fullscreen .playfield { display:flex; flex-direction:column; flex:1; min-height:120px; }.fullscreen .screen,.player:fullscreen .screen { flex:1; height:100%; min-height:0; }
+.session { border-top:1px solid #dde5d4; margin-top:16px; padding-top:16px; }.session code { font-size:10px; overflow-wrap:anywhere; }.session small { font-size:11px; color:#748168; }
+.tabs { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0; }.tabs button[aria-pressed="true"] { background:#355b45; color:white; }
+.source { width:100%; min-height:90px; }.manage { margin-top:18px; padding-top:16px; border-top:1px solid #e0e6d8; }.manage summary { cursor:pointer; font-size:13px; font-weight:600; }
+.empty { color:#718264; padding:28px 0; text-align:center; }
+@media(max-width:600px) { .veil { padding:8px; }.player { padding:15px; border-radius:12px; }.player header { gap:8px; margin-bottom:10px; }.player header h2 { font-size:17px; }.player header button { padding:7px 9px; min-height:44px; }.grid { grid-template-columns:1fr; }.heading { align-items:flex-start; flex-direction:column; }.screen { height:55vh; }.sessionStatus { gap:4px 10px; padding:8px 10px; } }

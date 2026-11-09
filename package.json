@@ -1,0 +1,42 @@
+{
+  "name": "agentzero",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @agentzero/api --filter @agentzero/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tests.json",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "test:integration": "node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:live": "node --env-file-if-exists=.env ./node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.live.config.ts",
+    "plugin:build": "pnpm --filter @agentzero/plugin build",
+    "plugin:package": "pnpm plugin:build && node scripts/package-plugin.mjs",
+    "test:plugin": "pnpm plugin:package && node scripts/test-plugin-stdio.mjs",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx packages/database/src/migrate.ts",
+    "db:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1",
+    "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-db.ps1 -Stop",
+    "db:backup-test": "node --env-file-if-exists=.env --import tsx scripts/backup-restore.ts",
+    "ops:report": "node --env-file-if-exists=.env --import tsx scripts/operations-report.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@playwright/test": "1.65.0",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.2",
+    "eslint": "9.39.5",
+    "pg": "8.23.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "4.1.12"
+  }
+}

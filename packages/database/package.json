@@ -1,0 +1,20 @@
+{
+  "name": "@agentzero/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.44.7",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

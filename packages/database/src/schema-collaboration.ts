@@ -1,0 +1,17 @@
+import { sql } from 'drizzle-orm';
+import { bigint,check,index,pgTable,primaryKey,text,timestamp,unique,uniqueIndex,uuid } from 'drizzle-orm/pg-core';
+import { agents,users } from './schema.js';
+import { tasks } from './schema-tasks.js';
+const time=(name:string)=>timestamp(name,{withTimezone:true});
+export const collaborationAgreements=pgTable('collaboration_agreements',{
+  id:uuid('id').primaryKey().defaultRandom(),taskId:uuid('task_id').notNull().references(()=>tasks.id),version:bigint('version',{mode:'bigint'}).notNull(),status:text('status').notNull().default('pending'),deadlineAt:time('deadline_at').notNull(),createdAt:time('created_at').notNull().defaultNow(),activatedAt:time('activated_at'),rejectionReason:text('rejection_reason'),
+},t=>[unique('collaboration_agreements_task_id_version_key').on(t.taskId,t.version),uniqueIndex('collaboration_active_idx').on(t.taskId).where(sql`${t.status}='active'`),uniqueIndex('collaboration_pending_idx').on(t.taskId).where(sql`${t.status}='pending'`),check('collaboration_agreements_version_check',sql`${t.version}>0`),check('collaboration_agreements_status_check',sql`${t.status} IN ('pending','active','superseded','rejected')`),check('collaboration_agreements_rejection_reason_check',sql`length(btrim(${t.rejectionReason})) BETWEEN 1 AND 500`)]);
+export const agreementMembers=pgTable('agreement_members',{
+  agreementId:uuid('agreement_id').notNull().references(()=>collaborationAgreements.id),agentId:uuid('agent_id').notNull().references(()=>agents.id),role:text('role').notNull(),deliverable:text('deliverable').notNull(),amountPoints:bigint('amount_points',{mode:'bigint'}).notNull(),
+},t=>[primaryKey({columns:[t.agreementId,t.agentId]}),index('agreement_members_agent_idx').on(t.agentId,t.agreementId),check('agreement_members_amount_points_check',sql`${t.amountPoints}>=0`),check('agreement_members_role_check',sql`length(btrim(${t.role})) BETWEEN 1 AND 80`),check('agreement_members_deliverable_check',sql`length(btrim(${t.deliverable})) BETWEEN 1 AND 2000`)]);
+export const agreementConfirmations=pgTable('agreement_confirmations',{
+  agreementId:uuid('agreement_id').notNull().references(()=>collaborationAgreements.id),subjectKey:text('subject_key').notNull(),agentId:uuid('agent_id').references(()=>agents.id),userId:uuid('user_id').notNull().references(()=>users.id),acceptedAt:time('accepted_at'),actorType:text('actor_type'),actorUserId:uuid('actor_user_id').references(()=>users.id),actorAgentId:uuid('actor_agent_id').references(()=>agents.id),
+},t=>[primaryKey({columns:[t.agreementId,t.subjectKey]}),check('agreement_confirmations_actor_type_check',sql`${t.actorType} IN ('user','agent')`),check('agreement_confirmations_check',sql`${t.subjectKey}='publisher' OR ${t.subjectKey}='agent:'||${t.agentId}::text`)]);
+export const taskContributions=pgTable('task_contributions',{
+  id:uuid('id').primaryKey().defaultRandom(),taskId:uuid('task_id').notNull().references(()=>tasks.id),agreementId:uuid('agreement_id').references(()=>collaborationAgreements.id),agentId:uuid('agent_id').notNull().references(()=>agents.id),kind:text('kind').notNull(),body:text('body').notNull(),url:text('url'),createdAt:time('created_at').notNull().defaultNow(),
+},t=>[index('task_contributions_task_idx').on(t.taskId,t.createdAt,t.id),check('task_contributions_kind_check',sql`${t.kind} IN ('pr','test','note')`),check('task_contributions_body_check',sql`length(btrim(${t.body})) BETWEEN 1 AND 8000`),check('task_contributions_url_check',sql`${t.url} ~ '^https://' AND length(${t.url})<=2000`)]);

@@ -1,0 +1,12 @@
+- insert:
+    - id: mcp-agentzero
+      name: '@deepseek-ai/dsh-mcp-client'
+      inject: ['pluginPackages']
+      config:
+        serverName: agentzero
+        transport: stdio
+        command: !!js process.execPath
+        args:
+          - !!js process.getBuiltinModule('node:path').join(pluginPackages.packageOf('@agentzero/plugin', baseUrl).dir, 'dist', 'index.cjs')
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
