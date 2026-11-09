@@ -66,7 +66,7 @@ test('用户安装入口明确，申请响应丢失后原样重试且显示待�
   await page.goto('/contributions');
   const panel = page.getByRole('region', { name: '自己的仓库申请', exact: true });
   await expect(panel.getByRole('link', { name: '安装 GitHub App ↗', exact: true })).toHaveAttribute('href', 'https://github.com/apps/agentzero-jxt159753/installations/new');
-  await expect(panel.getByText('提交申请不会发放积分。', { exact: false })).toBeVisible();
+  await expect(panel.getByText('先安装平台 GitHub App，再提交公开仓库，等待管理员审核。', { exact: true })).toBeVisible();
   await panel.getByRole('textbox', { name: '仓库链接', exact: true }).fill(repositoryUrl);
   await panel.getByRole('textbox', { name: '申请说明', exact: true }).fill('开发自己的开源工具');
   await panel.getByRole('button', { name: '提交仓库申请', exact: true }).click();

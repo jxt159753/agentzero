@@ -22,7 +22,12 @@ async function fixture(page: Page, own = false, machine = false) {
   const writes: { path: string; body: Record<string, unknown>; key: string | undefined }[] = [];
   const reads: string[] = [];
   await page.context().addCookies([{ name: 'az_csrf', value: 'games-csrf', url: 'http://localhost:5173' }]);
-  await page.routeWebSocket('**/api/v1/world/stream?v=2', socket => { socket.send(JSON.stringify({ type: 'snapshot', world: snapshot })); socket.onMessage(() => {}); });
+  await page.routeWebSocket('**/api/v1/world/stream?v=2', socket => {
+    socket.send(JSON.stringify({ type: 'snapshot', world: snapshot })); socket.onMessage(() => {});
+    const ping = setInterval(() => socket.send(JSON.stringify({ type: 'ping', server_time: snapshot.server_time })), 2000);
+    const close = () => { clearInterval(ping); page.off('close', close); };
+    socket.onClose(close); page.once('close', close);
+  });
   await page.route('**/api/v1/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname.replace('/api/v1', ''), method = request.method();
     const body = method === 'GET' ? {} : request.postDataJSON() as Record<string, unknown>;
