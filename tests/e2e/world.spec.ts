@@ -1255,6 +1255,13 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
 test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', { tag: '@smoke' }, async ({ page }) => {
   test.setTimeout(Math.max(test.info().timeout, 90000));
   await page.clock.install();
+  const pauseClock = async () => {
+    const time = await page.evaluate(() => Date.now());
+    // Freeze the wall clock while pauseAt waits for an in-flight animation callback.
+    await page.clock.setFixedTime(time);
+    await page.clock.pauseAt(time);
+    await page.clock.setSystemTime(time);
+  };
   const advanceWalk = async () => {
     // Advance at 20 FPS, matching the app's maximum 50 ms physics step.
     for (let frame = 0; frame < 30; frame++) await page.clock.fastForward(50);
@@ -1272,7 +1279,7 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   const map = page.getByTestId('world-map');
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await expect(map).toHaveAttribute('data-model-count', '0');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await map.focus(); await pauseClock();
   await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(4.5);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
@@ -1306,7 +1313,7 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-user-house.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await map.focus(); await pauseClock();
   await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-x')), { timeout: 15000 }).toBeGreaterThan(5.22);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
@@ -1319,7 +1326,7 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-empty-owned-land.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await map.focus(); await pauseClock();
   await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(boundary - 0.25);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
