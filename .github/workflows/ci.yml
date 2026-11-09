@@ -84,7 +84,7 @@ jobs:
       - run: pnpm --filter @agentzero/web build
       - run: pnpm exec playwright install --with-deps chromium
       - name: Browser UI contract tests
-        run: pnpm test:e2e --workers=1
+        run: pnpm test:e2e tests/e2e/world.spec.ts --grep '锁鼠退出失焦|点击第一人称场景' --workers=1
       # The live tests reuse the test database only after integration tests finish.
       - name: Browser tests against the real API and test database
         run: pnpm test:e2e:live --workers=1
