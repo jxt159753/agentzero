@@ -1295,6 +1295,7 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   expect(cabinRequests).toBe(1);
   await page.screenshot({ path: '.local/town-user-house.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
+  await expect(map).toHaveAttribute('data-view', 'first-person');
   await map.focus(); await page.keyboard.down('w');
   await expect.poll(async () => Number(await map.getAttribute('data-self-x')), { timeout: 15000 }).toBeGreaterThan(5.22);
   await page.keyboard.up('w');
@@ -1306,6 +1307,7 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await expect(map).toHaveAttribute('data-model-count', '0');
   await page.screenshot({ path: '.local/town-empty-owned-land.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
+  await expect(map).toHaveAttribute('data-view', 'first-person');
   await map.focus(); await page.keyboard.down('w');
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(boundary - 0.25);
   await page.keyboard.up('w');
