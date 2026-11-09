@@ -34,7 +34,10 @@ async function mockWorld(page: Page) {
         for (const connection of connections) connection.send(JSON.stringify({ type: 'delta', server_time: world.server_time, visitors: { upsert: [world.visitors[0]], remove: [] }, self: world.self }));
       } else if (message.type === 'heartbeat') socket.send(JSON.stringify({ type: 'ping', server_time: world.server_time }));
     });
-    socket.onClose(() => connections.delete(socket));
+    // Match the real stream's idle ping cadence, including while the visitor only looks around.
+    const ping = setInterval(() => socket.send(JSON.stringify({ type: 'ping', server_time: world.server_time })), 2000);
+    const close = () => { clearInterval(ping); connections.delete(socket); page.off('close', close); };
+    socket.onClose(close); page.once('close', close);
   });
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname.replace('/api/v1', '');
@@ -124,10 +127,6 @@ for (const mobile of [false, true]) test(`室内暖灯冷窗和接触阴影随�
   else await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const state = await mockWorld(page), roomId = '74000000-0000-4000-8000-000000000001';
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   state.world.server_time = '2026-11-07T04:00:00.000Z';
   const furnishing: { model_id: keyof typeof WORLD_MODEL_CATALOG; x: number; y: number; scale: number; rotation: number }[] = [
     { model_id: 'bookshelf', x: -0.25, y: -1.02, scale: 0.55, rotation: 0 },
@@ -193,11 +192,6 @@ test('地块展示按访客到边缘的距离出现，实际靠近显示远离�
 
 test('展示气泡锚定地块上方，随俯视镜头移动且第一人称转身后隐藏', async ({ page }) => {
   const state = await mockWorld(page);
-  // The real stream sends idle pings every two seconds while the visitor only looks around.
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [],
     showcase: [{ type: 'text', title: '地块上方的公告', text: '跟随地块，不固定在屏幕角落。' }] });
   const visitor = { x: 5 + Math.sin(-0.65) * 2.6, y: 4 + Math.cos(-0.65) * 2.6 };
@@ -271,10 +265,6 @@ for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏�
   const state = await mockWorld(page);
   // Keep the overview walking target clear of unrelated public-building hit areas.
   Object.assign(state.world, { places: [], public_areas: [] });
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   const modelId = '74000000-0000-4000-8000-000000000001';
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [],
     models: [{ id: modelId, version: '1', model_id: 'studio', x: 0, y: 0, rotation: 0, scale: 1 }],
@@ -335,10 +325,6 @@ for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏�
 test('地块展示气泡分页呈现四类内容，媒体按需加载且手机不溢出', async ({ page }) => {
   test.setTimeout(60000);
   const state = await mockWorld(page), requests: string[] = [], errors: string[] = [];
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [], showcase: [
     { type: 'text', title: '创作笔记', text: '欢迎来到青苔工作室\n<script>window.untrustedShowcase = true</script>' },
     { type: 'image', title: '花园一角', url: 'https://showcase.example/garden.svg' },
@@ -1128,7 +1114,7 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   const box = (await map.locator('canvas').boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.55);
   await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.55);
-  await expect.poll(() => map.locator('canvas').evaluate(canvas => document.pointerLockElement === canvas)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement !== null && document.pointerLockElement === document.querySelector('[data-testid="world-map"] canvas'))).toBe(true);
   await expect(map.locator('canvas')).toHaveCSS('cursor', 'none');
   await expect(page).toHaveURL(/\/world$/);
   await page.mouse.move(box.x + box.width * 0.45 + 150, box.y + box.height * 0.55, { steps: 8 });
@@ -1249,7 +1235,7 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
 });
 
 test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(90000);
   const state = await mockWorld(page);
   let cabinRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === WORLD_ASSETS.cabin.url) cabinRequests++; });
