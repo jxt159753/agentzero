@@ -790,7 +790,7 @@ test('俯瞰时访客显示姓名与本人标识，点击其他访客打开私�
   await expect(page).toHaveURL(`/messages?user=${otherUserId}`);
 });
 
-test('共享地图显示真实工作室、独立访客与离线 Agent，移动只提交访客位置', async ({ page }) => {
+test('共享地图显示真实工作室、独立访客与离线 Agent，移动只提交访客位置', { tag: '@smoke' }, async ({ page }) => {
   const state = await mockWorld(page);
   await page.goto('/world');
   await expect(page.getByTestId('world-connection')).toContainText('已同步');
@@ -1114,7 +1114,7 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
   expect(state.moves).toHaveLength(0); expect(state.writes).toHaveLength(0);
 });
 
-test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', async ({ page }) => {
+test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', { tag: '@smoke' }, async ({ page }) => {
   const state = await mockWorld(page);
   await page.goto('/world');
   const map = page.getByTestId('world-map');
@@ -1128,14 +1128,15 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   await expect(map.locator('canvas')).toHaveCSS('cursor', 'none');
   await expect(page).toHaveURL(/\/world$/);
   // CDP mouse.move uses absolute coordinates; supply relative samples after verifying the real lock.
-  await page.evaluate(async () => {
+  const turnedYaw = await page.evaluate(async () => {
     document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 0 }));
     for (let step = 0; step < 8; step++) {
       document.dispatchEvent(new MouseEvent('mousemove', { movementX: 150 / 8, movementY: 0 }));
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     }
+    return Number(document.querySelector<HTMLElement>('[data-testid="world-map"]')!.dataset.cameraYaw);
   });
-  await expect.poll(async () => Number(await map.getAttribute('data-camera-yaw'))).toBeLessThan(-0.9);
+  expect(turnedYaw).toBeLessThan(-0.9);
   await map.focus(); await page.keyboard.down('w');
   await expect.poll(async () => Number(await map.getAttribute('data-self-x'))).toBeGreaterThan(0.04);
   await page.keyboard.up('w');
@@ -1251,9 +1252,20 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
   await touch.detach();
 });
 
-test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', async ({ page }) => {
+test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', { tag: '@smoke' }, async ({ page }) => {
   test.setTimeout(Math.max(test.info().timeout, 90000));
   await page.clock.install();
+  const pauseClock = async () => {
+    const time = await page.evaluate(() => Date.now());
+    // Freeze the wall clock while pauseAt waits for an in-flight animation callback.
+    await page.clock.setFixedTime(time);
+    await page.clock.pauseAt(time);
+    await page.clock.setSystemTime(time);
+  };
+  const advanceWalk = async () => {
+    // Advance at 20 FPS, matching the app's maximum 50 ms physics step.
+    for (let frame = 0; frame < 30; frame++) await page.clock.fastForward(50);
+  };
   const state = await mockWorld(page);
   let cabinRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === WORLD_ASSETS.cabin.url) cabinRequests++; });
@@ -1267,8 +1279,8 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   const map = page.getByTestId('world-map');
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await expect(map).toHaveAttribute('data-model-count', '0');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
-  await page.keyboard.down('w'); await page.clock.runFor(1500);
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(4.5);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   // This path crosses the former implicit house footprint, instead of sliding around an invisible wall.
@@ -1301,8 +1313,8 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-user-house.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
-  await page.keyboard.down('w'); await page.clock.runFor(1500);
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-x')), { timeout: 15000 }).toBeGreaterThan(5.22);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(Number(await map.getAttribute('data-self-y'))).toBeGreaterThan(boundary - 0.01);
@@ -1314,8 +1326,8 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-empty-owned-land.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
-  await page.keyboard.down('w'); await page.clock.runFor(1500);
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(boundary - 0.25);
   await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(state.writes.map(write => write.path)).toEqual([
