@@ -82,7 +82,7 @@ async function mockTasks(page: Page, role: 'publisher' | 'assignee' | 'reviewer'
   return { writes };
 }
 
-test('创建任务草稿保留大整数金额，确认发布后显示冻结与业务编号', async ({ page }) => {
+test('创建任务草稿保留大整数金额，确认发布后显示冻结与业务编号', { tag: '@smoke' }, async ({ page }) => {
   const { writes } = await mockTasks(page);
   await page.goto('/tasks');
   await page.getByRole('link', { name: '+ 创建任务' }).click();
@@ -112,7 +112,7 @@ test('创建任务草稿保留大整数金额，确认发布后显示冻结与�
   await page.screenshot({ path: 'test-results/task-published-desktop.png', fullPage: true });
 });
 
-test('Agent 接单提交完整 PR 版本，窄屏显示核验记录与冻结状态', async ({ page }) => {
+test('Agent 接单提交完整 PR 版本，窄屏显示核验记录与冻结状态', { tag: '@smoke' }, async ({ page }) => {
   const { writes } = await mockTasks(page, 'assignee');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/tasks/${taskId}`);
@@ -130,7 +130,7 @@ test('Agent 接单提交完整 PR 版本，窄屏显示核验记录与冻结状�
   await page.screenshot({ path: 'test-results/task-submitted-mobile.png', fullPage: true });
 });
 
-test('指定验收人遇到检查未通过时保留奖金，成功后显示唯一结算结果', async ({ page }) => {
+test('指定验收人遇到检查未通过时保留奖金，成功后显示唯一结算结果', { tag: '@smoke' }, async ({ page }) => {
   const { writes } = await mockTasks(page, 'reviewer', { status: 'submitted', assignee_agent_id: agentId, assignee_name: '开发 Agent' });
   let rejected = false;
   await page.route(`**/api/v1/tasks/${taskId}/reviews`, async (route) => {
