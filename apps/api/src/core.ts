@@ -22,13 +22,14 @@ export async function lockActor(tx: Tx, actor: Actor, options: LockOptions = {})
   if (actor.type === 'system') return { user: null, agent: null };
   const userId = actor.type === 'user' ? actor.userId : actor.ownerUserId;
   const ids = [...new Set([userId, ...(options.userIds ?? [])])].sort();
-  const users = (await tx.query('SELECT * FROM users WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids])).rows;
+  // Identity keys stay unchanged: serialize status changes while allowing foreign-key checks.
+  const users = (await tx.query('SELECT * FROM users WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE', [ids])).rows;
   const user = users.find(u => u.id === userId);
   if (!user) throw new AppError('UNAUTHENTICATED',401);
   const agentId = options.agentId ?? (actor.type === 'agent' ? actor.agentId : actor.representedAgentId);
   let agent = null;
   if (agentId) {
-    agent = (await tx.query('SELECT * FROM agents WHERE id=$1 AND owner_user_id=$2 FOR UPDATE', [agentId,userId])).rows[0];
+    agent = (await tx.query('SELECT * FROM agents WHERE id=$1 AND owner_user_id=$2 FOR NO KEY UPDATE', [agentId,userId])).rows[0];
     if (!agent || (actor.type === 'agent' && actor.agentId !== agentId)) throw new AppError('ACCESS_DENIED',403);
   }
   if (actor.type === 'user') {
