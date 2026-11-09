@@ -122,7 +122,7 @@ test('布置面板选择房屋室内，保存游戏机后重新进入仍可看�
 });
 
 for (const mobile of [false, true]) test(`室内暖灯冷窗和接触阴影随昼夜变化，${mobile ? '手机' : '桌面'}切换俯视与室外恢复正确`, async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   if (mobile) await page.setViewportSize({ width: 390, height: 844 });
   else await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -260,7 +260,7 @@ test('展示气泡锚定地块上方，随俯视镜头移动且第一人称转�
 });
 
 for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏览展示，${mobile ? '手机' : '桌面'}无需仰视`, async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   const state = await mockWorld(page);
   // Keep the overview walking target clear of unrelated public-building hit areas.
@@ -323,7 +323,7 @@ for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏�
 });
 
 test('地块展示气泡分页呈现四类内容，媒体按需加载且手机不溢出', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page), requests: string[] = [], errors: string[] = [];
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [], showcase: [
     { type: 'text', title: '创作笔记', text: '欢迎来到青苔工作室\n<script>window.untrustedShowcase = true</script>' },
@@ -463,7 +463,7 @@ test('展示气泡支持锁鼠V阅读，并在面板布置断线及展示撤回�
 });
 
 test('灯椅比例：真实GLB、公共场景与占位模型采用一致人尺度，用户缩放仍等比', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page);
   await page.goto('/world');
   await expect(page.getByTestId('world-map')).toHaveAttribute('data-assets-loaded', '7');
@@ -521,7 +521,7 @@ test('灯椅比例：真实GLB、公共场景与占位模型采用一致人尺�
 });
 
 test('灯椅比例：近景日夜与手机显示正常，既有布置坐标旋转和用户倍率保持', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page), errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   state.world.server_time = '2026-11-08T04:00:00.000Z';
@@ -899,7 +899,7 @@ async function motionState(page: Page) {
 }
 
 test('跑跳：Shift跑动实测两倍速度，松开恢复且位置同步保持节流', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page); state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
   Object.assign(state.world.self, { x: 10, y: 10 }); Object.assign(state.world.visitors[0]!, { x: 10, y: 10 });
@@ -922,7 +922,7 @@ test('跑跳：Shift跑动实测两倍速度，松开恢复且位置同步保持
 });
 
 test('跑跳：原地跳跃升降落地，空中和长按不连跳且不写位置', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page); state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
   await page.goto('/world'); const map = page.getByTestId('world-map'); await expect(map).toHaveAttribute('data-assets-loaded', '7');
@@ -951,7 +951,7 @@ test('跑跳：原地跳跃升降落地，空中和长按不连跳且不写位�
 });
 
 test('跑跳：空中跑动仍受房屋碰撞约束，失焦立即停止并落地', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page), cabin = WORLD_MODEL_CATALOG.cabin, boundary = 4 + cabin.depth / 2 + 0.075;
   state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
@@ -1235,7 +1235,7 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
 });
 
 test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', async ({ page }) => {
-  test.setTimeout(90000);
+  test.setTimeout(Math.max(test.info().timeout, 90000));
   const state = await mockWorld(page);
   let cabinRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === WORLD_ASSETS.cabin.url) cabinRequests++; });

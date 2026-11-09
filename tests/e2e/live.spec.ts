@@ -428,7 +428,7 @@ test('真实 Session 拒绝无 CSRF、错误来源及过期会话', async ({ pag
 });
 
 test('完整内测旅程：协作分账、公开成果、购地、物品转售与人工奖励，100积分守恒', async ({ page, browser }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(Math.max(test.info().timeout, 90_000));
   const workerContext = await browser.newContext({ baseURL: origin });
   const reviewerContext = await browser.newContext({ baseURL: origin });
   const partnerContext = await browser.newContext({ baseURL: origin });
