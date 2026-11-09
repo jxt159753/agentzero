@@ -13,31 +13,6 @@ const taskId = '44000000-0000-4000-8000-000000000001';
 const timestamp = '2026-11-07T09:00:00.000Z';
 const respond = (route: Route, data: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
 
-async function recordPointerInput(page: Page) {
-  await page.addInitScript(() => {
-    const events: Record<string, unknown>[] = [];
-    Object.assign(window, { __ciPointerEvents: events });
-    const record = (event: Event) => {
-      const mouse = event as MouseEvent, map = document.querySelector('[data-testid="world-map"]');
-      events.push({ time: performance.now(), type: event.type, trusted: event.isTrusted,
-        movementX: mouse.movementX, movementY: mouse.movementY, clientX: mouse.clientX, clientY: mouse.clientY,
-        screenX: mouse.screenX, screenY: mouse.screenY, locked: document.pointerLockElement === map?.querySelector('canvas'),
-        focus: document.hasFocus(), yaw: map?.getAttribute('data-camera-yaw') });
-    };
-    document.addEventListener('pointerlockchange', record);
-    document.addEventListener('mousemove', record);
-    window.addEventListener('blur', record);
-  });
-}
-test.afterEach(async ({ page }, testInfo) => {
-  const events = await page.evaluate(() => (window as typeof window & { __ciPointerEvents?: unknown[] }).__ciPointerEvents);
-  if (events) {
-    const body = JSON.stringify({ test: testInfo.title, events });
-    console.log('POINTER_DIAGNOSTICS ' + body);
-    await testInfo.attach('pointer-input-events', { body, contentType: 'application/json' });
-  }
-});
-
 async function mockWorld(page: Page) {
   const land: WorldLand = { id: landId, code: 'TOWN-01', x: 2, y: 1, area: 100, name: '青苔工作室', works_url: 'https://example.com/works', owner_agent_id: agentId, owner_name: '设计伙伴', owner: { id: userId, github_login: 'owner', display_name: '小镇主人' }, tradeable: true, purchasable: false, points_price: '40', version: '1', listing: { id: '54000000-0000-4000-8000-000000000001', version: '1', points_price: '50' }, decorations: [{ id: '64000000-0000-4000-8000-000000000001', name: '桌面绿植', appearance: 'plant' }] };
   const world: WorldSnapshot = { server_time: timestamp, presence_ttl_seconds: 60, self: { kind: 'visitor', id: userId, x: 0, y: 0, online: true }, places: WORLD_PLACES, bounds: WORLD_BOUNDS, public_areas: WORLD_PUBLIC_AREAS, lands: [land], agents: [{ id: agentId, name: '设计伙伴', owner: { id: userId, github_login: 'owner', display_name: '小镇主人' }, status: 'active', online: false, x: 2, y: 1 }, { id: otherAgentId, name: '代码伙伴', owner: { id: otherUserId, github_login: 'neighbor', display_name: '邻居' }, status: 'active', online: true, x: -2, y: 1 }], visitors: [{ id: userId, name: '小镇主人', github_login: 'owner', online: true, x: 0, y: 0 }, { id: otherUserId, name: '邻居', github_login: 'neighbor', online: true, x: 1, y: 0 }] };
@@ -1088,7 +1063,6 @@ test('锁鼠异常位移与同帧输入积压不会甩头，正常连续转向�
 });
 
 test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ page }) => {
-  await recordPointerInput(page);
   const state = await mockWorld(page);
   state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
   await page.goto('/world');
@@ -1106,11 +1080,18 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
   });
   await expect(map).toHaveAttribute('data-pointer-locked', 'false');
   expect(await yaw()).toBe(initial);
+  await page.evaluate(() => {
+    // Run after the app resets look state, before a native mousemove can consume the first sample.
+    const reposition = () => {
+      if (document.pointerLockElement !== document.querySelector('[data-testid="world-map"] canvas')) return;
+      document.removeEventListener('pointerlockchange', reposition);
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 200, movementY: 100 }));
+    };
+    document.addEventListener('pointerlockchange', reposition);
+  });
   await page.getByRole('button', { name: '进入漫游', exact: true }).click();
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
   await page.evaluate(async () => {
-    // A cursor reposition at lock acquisition must not turn the camera.
-    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 200, movementY: 100 }));
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
   expect(await yaw()).toBe(initial);
@@ -1131,7 +1112,6 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
 });
 
 test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', async ({ page }) => {
-  await recordPointerInput(page);
   const state = await mockWorld(page);
   await page.goto('/world');
   const map = page.getByTestId('world-map');
@@ -1144,7 +1124,14 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   await expect.poll(() => page.evaluate(() => document.pointerLockElement !== null && document.pointerLockElement === document.querySelector('[data-testid="world-map"] canvas'))).toBe(true);
   await expect(map.locator('canvas')).toHaveCSS('cursor', 'none');
   await expect(page).toHaveURL(/\/world$/);
-  await page.mouse.move(box.x + box.width * 0.45 + 150, box.y + box.height * 0.55, { steps: 8 });
+  // CDP mouse.move uses absolute coordinates; supply relative samples after verifying the real lock.
+  await page.evaluate(async () => {
+    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 0 }));
+    for (let step = 0; step < 8; step++) {
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 150 / 8, movementY: 0 }));
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+  });
   await expect.poll(async () => Number(await map.getAttribute('data-camera-yaw'))).toBeLessThan(-0.9);
   await map.focus(); await page.keyboard.down('w');
   await expect.poll(async () => Number(await map.getAttribute('data-self-x'))).toBeGreaterThan(0.04);
