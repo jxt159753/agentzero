@@ -1035,7 +1035,10 @@ test('锁鼠异常位移与同帧输入积压不会甩头，正常连续转向�
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await page.getByRole('button', { name: '进入漫游', exact: true }).click();
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
-  const angles = () => map.evaluate(element => ({ yaw: Number((element as HTMLElement).dataset.cameraYaw), pitch: Number((element as HTMLElement).dataset.cameraPitch) }));
+  const angles = () => page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>('[data-testid="world-map"]')!;
+    return { yaw: Number(element.dataset.cameraYaw), pitch: Number(element.dataset.cameraPitch) };
+  });
   const input = async (samples: { x: number; y: number }[], separateFrames = false) => page.evaluate(async ({ samples, separateFrames }) => {
     for (const sample of samples) {
       document.dispatchEvent(new MouseEvent('mousemove', { movementX: sample.x, movementY: sample.y }));
@@ -1250,6 +1253,7 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
 
 test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', async ({ page }) => {
   test.setTimeout(Math.max(test.info().timeout, 90000));
+  await page.clock.install();
   const state = await mockWorld(page);
   let cabinRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === WORLD_ASSETS.cabin.url) cabinRequests++; });
@@ -1263,9 +1267,10 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   const map = page.getByTestId('world-map');
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await expect(map).toHaveAttribute('data-model-count', '0');
-  await map.focus(); await page.keyboard.down('w');
+  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await page.keyboard.down('w'); await page.clock.runFor(1500);
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(4.5);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   // This path crosses the former implicit house footprint, instead of sliding around an invisible wall.
   expect(Number(await map.getAttribute('data-self-x'))).toBeLessThan(5.7);
   expect(state.writes).toHaveLength(0);
@@ -1296,9 +1301,10 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-user-house.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.keyboard.down('w');
+  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await page.keyboard.down('w'); await page.clock.runFor(1500);
   await expect.poll(async () => Number(await map.getAttribute('data-self-x')), { timeout: 15000 }).toBeGreaterThan(5.22);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(Number(await map.getAttribute('data-self-y'))).toBeGreaterThan(boundary - 0.01);
   await page.getByRole('button', { name: '布置模型', exact: true }).click();
   await builder.getByRole('button', { name: new RegExp(cabin.label + '.*调整') }).click();
@@ -1308,9 +1314,10 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await page.screenshot({ path: '.local/town-empty-owned-land.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
   await expect(map).toHaveAttribute('data-view', 'first-person');
-  await map.focus(); await page.keyboard.down('w');
+  await map.focus(); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+  await page.keyboard.down('w'); await page.clock.runFor(1500);
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(boundary - 0.25);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(state.writes.map(write => write.path)).toEqual([
     `/world/studios/${landId}/models`, `/world/studios/${landId}/models/74000000-0000-4000-8000-000000000001`,
   ]);
