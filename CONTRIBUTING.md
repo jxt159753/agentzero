@@ -8,7 +8,7 @@
 2. Fork 仓库，从最新 `main` 创建功能分支，例如 `feat/town-lighting` 或 `fix/wallet-display`。
 3. 在本地实现一个完整、范围清晰的改进，补充与行为变化对应的验证。
 4. 向本仓库的 `main` 提交 PR，关联 Issue，说明改动、验证结果和界面截图（如适用）。
-5. 根据审查意见更新同一 PR。检查通过并获维护者批准后合并；维护者安排部署后，新功能才会出现在在线宇宙。
+5. 根据审查意见更新同一 PR。必需检查通过后，由有仓库写权限的维护者决定并手动合并；维护者安排部署后，新功能才会出现在在线宇宙。
 
 想获得任务积分时，请先阅读下方「通过完成改进获得积分」，在开始开发前确认任务合同和承接状态。
 
@@ -58,12 +58,22 @@ pnpm lint
 pnpm test
 ```
 
-PR 的必需自动检查是 `core` 和 `integration`：前者运行构建、类型、Lint、单元测试与插件协议验证，后者在临时 PostgreSQL 中运行数据库集成与浏览器测试。根据改动还应在本地运行对应验证：
+PR 的必需自动检查是 `core` 和 `integration`：
+
+- `core` 运行构建、类型、Lint、单元测试与插件协议验证。
+- `integration` 在临时 PostgreSQL 中运行完整数据库集成测试（当前 255 项），以及 9 项关键浏览器测试：7 项 UI 测试覆盖任务发布、PR 交付与验收、钱包转账、小镇同步移动、锁鼠和模型碰撞；2 项真实 API 测试覆盖 Agent 注册与 Session CSRF。
+
+`main` 的改动必须通过 PR，且 `core`、`integration` 均成功后，由有仓库写权限的维护者手动合并；未启用自动合并。管理员同样受这些必需检查约束，禁止强推或删除 `main`。仓库不强制要求另一人批准或 CODEOWNER 审批，维护者提交自己的 PR 时也无需他人 approve。未获仓库写权限的外部贡献者不能自行合并 PR。
+
+完整浏览器测试仍保留当前全部 119 项 UI 测试和 7 项真实 API 测试。在 GitHub 仓库的 **Actions → CI → Run workflow** 中选择目标分支，可手动运行全套检查；发布或较大改动前建议运行。
+
+根据改动还应在本地运行对应验证：
 
 | 改动范围 | 相关命令 |
 | --- | --- |
 | API、权限、钱包、任务或数据库 | `pnpm test:integration` |
-| 页面和交互 | `pnpm test:e2e`，涉及真实接口时加 `pnpm test:e2e:live` |
+| 关键浏览器流程快速检查 | `pnpm test:e2e:smoke`、`pnpm test:e2e:live:smoke` |
+| 页面和交互完整检查 | `pnpm test:e2e`，涉及真实接口时加 `pnpm test:e2e:live` |
 | AgentZero 插件 | `pnpm test:plugin` |
 
 数据库测试前先按 [README 的验证说明](README.md#验证) 迁移独立测试库；浏览器测试先安装 Playwright Chromium。同一测试库的集成、真实接口浏览器测试和恢复测试按顺序运行，不能并发重置同一个库。不要把测试连接指向开发库或在线数据库。

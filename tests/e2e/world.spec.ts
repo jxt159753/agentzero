@@ -34,7 +34,10 @@ async function mockWorld(page: Page) {
         for (const connection of connections) connection.send(JSON.stringify({ type: 'delta', server_time: world.server_time, visitors: { upsert: [world.visitors[0]], remove: [] }, self: world.self }));
       } else if (message.type === 'heartbeat') socket.send(JSON.stringify({ type: 'ping', server_time: world.server_time }));
     });
-    socket.onClose(() => connections.delete(socket));
+    // Match the real stream's idle ping cadence, including while the visitor only looks around.
+    const ping = setInterval(() => socket.send(JSON.stringify({ type: 'ping', server_time: world.server_time })), 2000);
+    const close = () => { clearInterval(ping); connections.delete(socket); page.off('close', close); };
+    socket.onClose(close); page.once('close', close);
   });
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname.replace('/api/v1', '');
@@ -122,15 +125,11 @@ test('布置面板选择房屋室内，保存游戏机后重新进入仍可看�
 });
 
 for (const mobile of [false, true]) test(`室内暖灯冷窗和接触阴影随昼夜变化，${mobile ? '手机' : '桌面'}切换俯视与室外恢复正确`, async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   if (mobile) await page.setViewportSize({ width: 390, height: 844 });
   else await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const state = await mockWorld(page), roomId = '74000000-0000-4000-8000-000000000001';
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   state.world.server_time = '2026-11-07T04:00:00.000Z';
   const furnishing: { model_id: keyof typeof WORLD_MODEL_CATALOG; x: number; y: number; scale: number; rotation: number }[] = [
     { model_id: 'bookshelf', x: -0.25, y: -1.02, scale: 0.55, rotation: 0 },
@@ -196,11 +195,6 @@ test('地块展示按访客到边缘的距离出现，实际靠近显示远离�
 
 test('展示气泡锚定地块上方，随俯视镜头移动且第一人称转身后隐藏', async ({ page }) => {
   const state = await mockWorld(page);
-  // The real stream sends idle pings every two seconds while the visitor only looks around.
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [],
     showcase: [{ type: 'text', title: '地块上方的公告', text: '跟随地块，不固定在屏幕角落。' }] });
   const visitor = { x: 5 + Math.sin(-0.65) * 2.6, y: 4 + Math.cos(-0.65) * 2.6 };
@@ -269,15 +263,11 @@ test('展示气泡锚定地块上方，随俯视镜头移动且第一人称转�
 });
 
 for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏览展示，${mobile ? '手机' : '桌面'}无需仰视`, async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   const state = await mockWorld(page);
   // Keep the overview walking target clear of unrelated public-building hit areas.
   Object.assign(state.world, { places: [], public_areas: [] });
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   const modelId = '74000000-0000-4000-8000-000000000001';
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [],
     models: [{ id: modelId, version: '1', model_id: 'studio', x: 0, y: 0, rotation: 0, scale: 1 }],
@@ -336,12 +326,8 @@ for (const mobile of [false, true]) test(`平视靠近房屋和高树即可浏�
 });
 
 test('地块展示气泡分页呈现四类内容，媒体按需加载且手机不溢出', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page), requests: string[] = [], errors: string[] = [];
-  const ping = setInterval(() => {
-    for (const socket of state.connections) socket.send(JSON.stringify({ type: 'ping', server_time: state.world.server_time }));
-  }, 2000);
-  page.once('close', () => clearInterval(ping));
   Object.assign(state.land, { x: 5, y: 4, width: 3, height: 3, area: 900, listing: null, decorations: [], showcase: [
     { type: 'text', title: '创作笔记', text: '欢迎来到青苔工作室\n<script>window.untrustedShowcase = true</script>' },
     { type: 'image', title: '花园一角', url: 'https://showcase.example/garden.svg' },
@@ -480,7 +466,7 @@ test('展示气泡支持锁鼠V阅读，并在面板布置断线及展示撤回�
 });
 
 test('灯椅比例：真实GLB、公共场景与占位模型采用一致人尺度，用户缩放仍等比', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page);
   await page.goto('/world');
   await expect(page.getByTestId('world-map')).toHaveAttribute('data-assets-loaded', '7');
@@ -538,7 +524,7 @@ test('灯椅比例：真实GLB、公共场景与占位模型采用一致人尺�
 });
 
 test('灯椅比例：近景日夜与手机显示正常，既有布置坐标旋转和用户倍率保持', async ({ page }) => {
-  test.setTimeout(60000);
+  test.setTimeout(Math.max(test.info().timeout, 60000));
   const state = await mockWorld(page), errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   state.world.server_time = '2026-11-08T04:00:00.000Z';
@@ -807,7 +793,7 @@ test('俯瞰时访客显示姓名与本人标识，点击其他访客打开私�
   await expect(page).toHaveURL(`/messages?user=${otherUserId}`);
 });
 
-test('共享地图显示真实工作室、独立访客与离线 Agent，移动只提交访客位置', async ({ page }) => {
+test('共享地图显示真实工作室、独立访客与离线 Agent，移动只提交访客位置', { tag: '@smoke' }, async ({ page }) => {
   const state = await mockWorld(page);
   await page.goto('/world');
   await expect(page.getByTestId('world-connection')).toContainText('已同步');
@@ -916,7 +902,7 @@ async function motionState(page: Page) {
 }
 
 test('跑跳：Shift跑动实测两倍速度，松开恢复且位置同步保持节流', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page); state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
   Object.assign(state.world.self, { x: 10, y: 10 }); Object.assign(state.world.visitors[0]!, { x: 10, y: 10 });
@@ -939,7 +925,7 @@ test('跑跳：Shift跑动实测两倍速度，松开恢复且位置同步保持
 });
 
 test('跑跳：原地跳跃升降落地，空中和长按不连跳且不写位置', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page); state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
   await page.goto('/world'); const map = page.getByTestId('world-map'); await expect(map).toHaveAttribute('data-assets-loaded', '7');
@@ -968,7 +954,7 @@ test('跑跳：原地跳跃升降落地，空中和长按不连跳且不写位�
 });
 
 test('跑跳：空中跑动仍受房屋碰撞约束，失焦立即停止并落地', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(Math.max(test.info().timeout, 60_000));
   await page.clock.install();
   const state = await mockWorld(page), cabin = WORLD_MODEL_CATALOG.cabin, boundary = 4 + cabin.depth / 2 + 0.075;
   state.world.agents = []; state.world.visitors = [state.world.visitors[0]!];
@@ -1052,7 +1038,10 @@ test('锁鼠异常位移与同帧输入积压不会甩头，正常连续转向�
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await page.getByRole('button', { name: '进入漫游', exact: true }).click();
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
-  const angles = () => map.evaluate(element => ({ yaw: Number((element as HTMLElement).dataset.cameraYaw), pitch: Number((element as HTMLElement).dataset.cameraPitch) }));
+  const angles = () => page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>('[data-testid="world-map"]')!;
+    return { yaw: Number(element.dataset.cameraYaw), pitch: Number(element.dataset.cameraPitch) };
+  });
   const input = async (samples: { x: number; y: number }[], separateFrames = false) => page.evaluate(async ({ samples, separateFrames }) => {
     for (const sample of samples) {
       document.dispatchEvent(new MouseEvent('mousemove', { movementX: sample.x, movementY: sample.y }));
@@ -1097,11 +1086,18 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
   });
   await expect(map).toHaveAttribute('data-pointer-locked', 'false');
   expect(await yaw()).toBe(initial);
+  await page.evaluate(() => {
+    // Run after the app resets look state, before a native mousemove can consume the first sample.
+    const reposition = () => {
+      if (document.pointerLockElement !== document.querySelector('[data-testid="world-map"] canvas')) return;
+      document.removeEventListener('pointerlockchange', reposition);
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 200, movementY: 100 }));
+    };
+    document.addEventListener('pointerlockchange', reposition);
+  });
   await page.getByRole('button', { name: '进入漫游', exact: true }).click();
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
   await page.evaluate(async () => {
-    // A cursor reposition at lock acquisition must not turn the camera.
-    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 200, movementY: 100 }));
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
   expect(await yaw()).toBe(initial);
@@ -1121,7 +1117,7 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
   expect(state.moves).toHaveLength(0); expect(state.writes).toHaveLength(0);
 });
 
-test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', async ({ page }) => {
+test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', { tag: '@smoke' }, async ({ page }) => {
   const state = await mockWorld(page);
   await page.goto('/world');
   const map = page.getByTestId('world-map');
@@ -1131,11 +1127,19 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   const box = (await map.locator('canvas').boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.55);
   await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.55);
-  await expect.poll(() => map.locator('canvas').evaluate(canvas => document.pointerLockElement === canvas)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement !== null && document.pointerLockElement === document.querySelector('[data-testid="world-map"] canvas'))).toBe(true);
   await expect(map.locator('canvas')).toHaveCSS('cursor', 'none');
   await expect(page).toHaveURL(/\/world$/);
-  await page.mouse.move(box.x + box.width * 0.45 + 150, box.y + box.height * 0.55, { steps: 8 });
-  await expect.poll(async () => Number(await map.getAttribute('data-camera-yaw'))).toBeLessThan(-0.9);
+  // CDP mouse.move uses absolute coordinates; supply relative samples after verifying the real lock.
+  const turnedYaw = await page.evaluate(async () => {
+    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 0 }));
+    for (let step = 0; step < 8; step++) {
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 150 / 8, movementY: 0 }));
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+    return Number(document.querySelector<HTMLElement>('[data-testid="world-map"]')!.dataset.cameraYaw);
+  });
+  expect(turnedYaw).toBeLessThan(-0.9);
   await map.focus(); await page.keyboard.down('w');
   await expect.poll(async () => Number(await map.getAttribute('data-self-x'))).toBeGreaterThan(0.04);
   await page.keyboard.up('w');
@@ -1251,8 +1255,20 @@ test('触屏继续拖动环视，浏览器拒绝锁定后可拖动且不会错�
   await touch.detach();
 });
 
-test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', async ({ page }) => {
-  test.setTimeout(60000);
+test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，移除后恢复空地', { tag: '@smoke' }, async ({ page }) => {
+  test.setTimeout(Math.max(test.info().timeout, 90000));
+  await page.clock.install();
+  const pauseClock = async () => {
+    const time = await page.evaluate(() => Date.now());
+    // Freeze the wall clock while pauseAt waits for an in-flight animation callback.
+    await page.clock.setFixedTime(time);
+    await page.clock.pauseAt(time);
+    await page.clock.setSystemTime(time);
+  };
+  const advanceWalk = async () => {
+    // Advance at 20 FPS, matching the app's maximum 50 ms physics step.
+    for (let frame = 0; frame < 30; frame++) await page.clock.fastForward(50);
+  };
   const state = await mockWorld(page);
   let cabinRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === WORLD_ASSETS.cabin.url) cabinRequests++; });
@@ -1266,9 +1282,10 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   const map = page.getByTestId('world-map');
   await expect(map).toHaveAttribute('data-assets-loaded', '7');
   await expect(map).toHaveAttribute('data-model-count', '0');
-  await map.focus(); await page.keyboard.down('w');
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(4.5);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   // This path crosses the former implicit house footprint, instead of sliding around an invisible wall.
   expect(Number(await map.getAttribute('data-self-x'))).toBeLessThan(5.7);
   expect(state.writes).toHaveLength(0);
@@ -1298,9 +1315,11 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   expect(cabinRequests).toBe(1);
   await page.screenshot({ path: '.local/town-user-house.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
-  await map.focus(); await page.keyboard.down('w');
+  await expect(map).toHaveAttribute('data-view', 'first-person');
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-x')), { timeout: 15000 }).toBeGreaterThan(5.22);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(Number(await map.getAttribute('data-self-y'))).toBeGreaterThan(boundary - 0.01);
   await page.getByRole('button', { name: '布置模型', exact: true }).click();
   await builder.getByRole('button', { name: new RegExp(cabin.label + '.*调整') }).click();
@@ -1309,9 +1328,11 @@ test('有主空地可直接穿行，用户自行添加房屋后碰撞生效，�
   await expect(map).toHaveAttribute('data-model-count', '0');
   await page.screenshot({ path: '.local/town-empty-owned-land.png', fullPage: true });
   await builder.getByRole('button', { name: '关闭模型布置', exact: true }).click();
-  await map.focus(); await page.keyboard.down('w');
+  await expect(map).toHaveAttribute('data-view', 'first-person');
+  await map.focus(); await pauseClock();
+  await page.keyboard.down('w'); await advanceWalk();
   await expect.poll(async () => Number(await map.getAttribute('data-self-y')), { timeout: 15000 }).toBeLessThan(boundary - 0.25);
-  await page.keyboard.up('w');
+  await page.keyboard.up('w'); await page.clock.runFor(64); await page.clock.resume();
   expect(state.writes.map(write => write.path)).toEqual([
     `/world/studios/${landId}/models`, `/world/studios/${landId}/models/74000000-0000-4000-8000-000000000001`,
   ]);

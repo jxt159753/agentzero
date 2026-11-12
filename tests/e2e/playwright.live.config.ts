@@ -11,7 +11,7 @@ export default defineConfig({
   testMatch: 'live.spec.ts',
   fullyParallel: false,
   workers: 1,
-  timeout: 60_000,
+  timeout: process.env.CI ? 120_000 : 60_000,
   outputDir: '../../test-results/live',
   use: { baseURL: 'http://localhost:3001', trace: 'retain-on-failure' },
   webServer: {

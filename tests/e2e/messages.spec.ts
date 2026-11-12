@@ -13,9 +13,9 @@ const composer = (page: Page) => page.getByRole('textbox', { name: '消息内容
 const history = (page: Page) => page.getByRole('list', { name: '消息记录', exact: true });
 
 async function mockMessages(page: Page, options: { lostResponse?: boolean; historyCount?: number; secondConversation?: boolean } = {}) {
-  const conversation: ConversationDto = { id: conversationId, kind: 'direct', task_id: null, created_at: timestamp, members: [{ user_id: null, agent_id: ownAgent, name: '开发 Agent', owner_user_id: userId }, { user_id: null, agent_id: recipient, name: '测试 Agent', owner_user_id: visitorId }] };
+  const conversation: ConversationDto = { id: conversationId, kind: 'direct', task_id: null, title: null, created_at: timestamp, members: [{ id: 'member-own', user_id: null, agent_id: ownAgent, name: '开发 Agent', owner_user_id: userId, role: 'member' }, { id: 'member-recipient', user_id: null, agent_id: recipient, name: '测试 Agent', owner_user_id: visitorId, role: 'member' }] };
   const conversations: ConversationDto[] = [conversation];
-  if (options.secondConversation) conversations.push({ id: secondConversationId, kind: 'direct', task_id: null, created_at: timestamp, members: [{ user_id: userId, agent_id: null, name: '开发者', owner_user_id: userId }, { user_id: visitorId, agent_id: null, name: '小镇邻居', owner_user_id: visitorId }] });
+  if (options.secondConversation) conversations.push({ id: secondConversationId, kind: 'direct', task_id: null, title: null, created_at: timestamp, members: [{ id: 'member-self-2', user_id: userId, agent_id: null, name: '开发者', owner_user_id: userId, role: 'member' }, { id: 'member-visitor-2', user_id: visitorId, agent_id: null, name: '小镇邻居', owner_user_id: visitorId, role: 'member' }] });
   const messages: MessageDto[] = Array.from({ length: options.historyCount ?? 1 }, (_, index) => ({ id: `message-${index + 1}`, cursor: String(index + 1), conversation_id: conversationId, sender_user_id: null, sender_agent_id: recipient, sender_name: '测试 Agent', body: options.historyCount ? `历史消息 ${index + 1}` : '可以协助测试；请在任务中发出协议。', created_at: new Date(Date.parse(timestamp) + index * 1000).toISOString() }));
   const writes: { path: string; body: Record<string, unknown>; key: string; csrf: string }[] = [];
   const messageReads: URL[] = [];
@@ -36,11 +36,11 @@ async function mockMessages(page: Page, options: { lostResponse?: boolean; histo
     if (path === '/conversations') {
       if (request.method() === 'GET') return reply(route, { items: conversations.map(withSummary), next_cursor: null });
       conversation.members[0] = body.sender_agent_id
-        ? { user_id: null, agent_id: ownAgent, name: '开发 Agent', owner_user_id: userId }
-        : { user_id: userId, agent_id: null, name: '开发者', owner_user_id: userId };
+        ? { id: 'member-own', user_id: null, agent_id: ownAgent, name: '开发 Agent', owner_user_id: userId, role: 'member' }
+        : { id: 'member-self', user_id: userId, agent_id: null, name: '开发者', owner_user_id: userId, role: 'member' };
       if (body.recipient_user_id) {
         const id = String(body.recipient_user_id);
-        conversation.members[1] = { user_id: id, agent_id: null, name: id === userId ? '开发者' : '小镇邻居', owner_user_id: id };
+        conversation.members[1] = { id: 'member-peer', user_id: id, agent_id: null, name: id === userId ? '开发者' : '小镇邻居', owner_user_id: id, role: 'member' };
         messages.length = 0;
       }
       return reply(route, { ...withSummary(conversation), operation_id: conversationId });

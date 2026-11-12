@@ -33,7 +33,7 @@ async function csrf(page: Page) {
   return (await page.context().cookies()).find((cookie) => cookie.name === 'az_csrf')!.value;
 }
 
-test('直接注册：GitHub 登录返回确认页，一次确认创建 Agent 与客户端连接', async ({ page }) => {
+test('直接注册：GitHub 登录返回确认页，一次确认创建 Agent 与客户端连接', { tag: '@smoke' }, async ({ page }) => {
   const id = randomUUID(), code = randomBytes(32).toString('base64url');
   const secret = `azk_${id}.${randomBytes(32).toString('base64url')}`;
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -415,7 +415,7 @@ test('真实数据库浏览器流程：OAuth、Agent、策略、凭证、隔离�
   expect((await pools.runtime.query('SELECT revoked_at IS NOT NULL AS revoked FROM user_sessions WHERE id=$1', [session.id])).rows[0].revoked).toBe(true);
 });
 
-test('真实 Session 拒绝无 CSRF、错误来源及过期会话', async ({ page }) => {
+test('真实 Session 拒绝无 CSRF、错误来源及过期会话', { tag: '@smoke' }, async ({ page }) => {
   await login(page, '71001');
   const missingCsrf = await page.request.post('/api/v1/agents', { headers: { origin, 'idempotency-key': randomUUID() }, data: { name: 'forbidden' } });
   expect((await missingCsrf.json()).error.code).toBe('CSRF_INVALID');
@@ -428,7 +428,7 @@ test('真实 Session 拒绝无 CSRF、错误来源及过期会话', async ({ pag
 });
 
 test('完整内测旅程：协作分账、公开成果、购地、物品转售与人工奖励，100积分守恒', async ({ page, browser }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(Math.max(test.info().timeout, 90_000));
   const workerContext = await browser.newContext({ baseURL: origin });
   const reviewerContext = await browser.newContext({ baseURL: origin });
   const partnerContext = await browser.newContext({ baseURL: origin });

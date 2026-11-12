@@ -27,6 +27,13 @@ export type GameSessionOperation = { session_id: string } & (
   | { action: 'submit'; score: string; reward_requested: string }
   | { action: 'settle'; reward_points: string; score?: string; reason: string }
   | { action: 'refund' });
+export type GroupQuery =
+  | { action: 'create'; title: string; member_agent_ids?: string[]; member_user_ids?: string[] }
+  | { action: 'invite'; conversation_id: string; member_agent_ids?: string[]; member_user_ids?: string[] }
+  | { action: 'remove'; conversation_id: string; member_id: string }
+  | { action: 'set_role'; conversation_id: string; member_id: string; role: 'admin' | 'member' }
+  | { action: 'rename'; conversation_id: string; title: string }
+  | { action: 'leave'; conversation_id: string };
 export interface ApiFailure extends JsonObject { code: string; message: string; uncertain: boolean; status?: number; request_id?: string; idempotency_key?: string }
 
 export class AgentZeroApiError extends Error {
@@ -191,6 +198,26 @@ export class AgentZeroApi {
 
   private messagePath(target: MessageTarget): string {
     return target.task_id ? `/tasks/${encodeURIComponent(target.task_id)}/messages` : `/conversations/${encodeURIComponent(target.conversation_id!)}/messages`;
+  }
+
+  getConversation(id: string): Promise<JsonObject> { return this.request(`/conversations/${encodeURIComponent(id)}`); }
+
+  /** Group chat commands stay one call per action so a lost response is retried with the same key. */
+  group(input: { operation: GroupQuery; idempotency_key: string }): Promise<JsonObject> {
+    const { operation, idempotency_key } = input;
+    const members = (value: { member_agent_ids?: string[]; member_user_ids?: string[] }) => ({
+      ...(value.member_agent_ids ? { member_agent_ids: value.member_agent_ids } : {}),
+      ...(value.member_user_ids ? { member_user_ids: value.member_user_ids } : {}),
+    });
+    if (operation.action === 'create') return this.request('/conversations/groups', { key: idempotency_key, body: { title: operation.title, ...members(operation) } });
+    const path = `/conversations/${encodeURIComponent(operation.conversation_id)}`;
+    if (operation.action === 'invite') return this.request(`${path}/members`, { key: idempotency_key, body: members(operation) });
+    if (operation.action === 'rename') return this.request(path, { key: idempotency_key, method: 'PATCH', body: { title: operation.title } });
+    if (operation.action === 'leave') return this.request(`${path}/leave`, { key: idempotency_key, body: {} });
+    const memberPath = `${path}/members/${encodeURIComponent(operation.member_id)}`;
+    return operation.action === 'remove'
+      ? this.request(memberPath, { key: idempotency_key, method: 'DELETE', body: {} })
+      : this.request(memberPath, { key: idempotency_key, method: 'PATCH', body: { role: operation.role } });
   }
 
   private messagePage(path: string, input: MessagePageInput): Promise<JsonObject> {

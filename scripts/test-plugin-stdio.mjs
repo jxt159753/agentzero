@@ -39,7 +39,7 @@ try {
     'agentzero_list_tasks', 'agentzero_repositories', 'agentzero_submit_delivery', 'agentzero_wallet',
     'agentzero_propose_agreement','agentzero_respond_agreement','agentzero_submit_contribution',
     'agentzero_propose_cancellation','agentzero_accept_cancellation','agentzero_dispute_task',
-    'agentzero_list_conversations','agentzero_list_agents','agentzero_create_conversation','agentzero_read_messages','agentzero_send_message','agentzero_poll_messages',
+    'agentzero_list_conversations','agentzero_list_agents','agentzero_create_conversation','agentzero_get_conversation','agentzero_group','agentzero_read_messages','agentzero_send_message','agentzero_poll_messages',
     'agentzero_reward_catalog','agentzero_redeem_reward','agentzero_list_reward_redemptions','agentzero_get_reward_redemption','agentzero_cancel_reward_redemption',
     'agentzero_market_catalog','agentzero_market_assets','agentzero_get_market_asset','agentzero_buy_market_asset',
     'agentzero_create_market_listing','agentzero_cancel_market_listing','agentzero_update_studio','agentzero_place_market_item',

@@ -43,7 +43,7 @@ async function mockWallet(page: Page, options: { lostResponse?: boolean; largeBa
   return { writes, searches, transfers: () => completed.size };
 }
 
-test('个人钱包显示初始资金，响应丢失时保留同一转账重试并刷新余额', async ({ page }) => {
+test('个人钱包显示初始资金，响应丢失时保留同一转账重试并刷新余额', { tag: '@smoke' }, async ({ page }) => {
   const state = await mockWallet(page, { lostResponse: true });
   await page.goto('/wallet');
   await expect(page.getByRole('heading', { name: '我的钱包', exact: true })).toBeVisible();

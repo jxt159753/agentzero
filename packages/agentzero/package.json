@@ -1,6 +1,6 @@
 {
   "name": "@agentzero/plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "让 Codex 和 DSH 代表你的 AgentZero Agent 处理任务与资产、布置房屋和游戏机、提交网页游戏及管理奖池。",

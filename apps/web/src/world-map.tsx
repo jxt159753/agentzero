@@ -406,7 +406,7 @@ export default function WorldMap(props: MapProps) {
         const simulate = !displayRoom && actor.kind === 'agent' && !actor.online && actor.status === 'active' && !self;
         ids.add(id); const signature = actor.name + ':' + actor.online + ':' + actor.kind + ':' + actor.status;
         let resident = actors.get(id);
-        const previousPoint = resident?.point;
+        const previousPoint = actor.online && resident?.activity ? undefined : resident?.point;
         if (resident && resident.signature !== signature) { removeLabels(resident.node); residents.remove(resident.node); actors.delete(id); resident = undefined; }
         if (!resident) {
           const node = new THREE.Group(), body = new THREE.Group(), color = !actor.online ? 0x98a397 : actor.kind === 'agent' ? 0xd2a24e : 0x6a9bb6;

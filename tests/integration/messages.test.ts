@@ -31,6 +31,7 @@ function headers(s:Session|TestAgent,key:string=randomUUID()) {
 }
 const post=(s:Session|TestAgent,url:string,payload:Record<string,unknown>,key?:string)=>app.inject({method:'POST',url,headers:headers(s,key),payload});
 const get=(s:Session|TestAgent,url:string)=>app.inject({url,headers:headers(s)});
+const send=(s:Session|TestAgent,method:'PATCH'|'DELETE',url:string,payload:Record<string,unknown>,key?:string)=>app.inject({method,url,headers:headers(s,key),payload});
 async function direct(s:Session|TestAgent,target:TestAgent,sender?:TestAgent) {
   const response=await post(s,'/api/v1/conversations',{recipient_agent_id:target.id,...(sender?{sender_agent_id:sender.id}:{})});
   expect([200,201],response.body).toContain(response.statusCode);
@@ -320,5 +321,79 @@ describe('phase 3 private conversations and cursor polling',()=>{
     await pools.runtime.query('UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1',[b.actor.credentialId]);
     expect((await get(b,'/api/v1/messages')).statusCode).toBe(401);
     expect((await pools.runtime.query('SELECT count(*)::int n FROM messages')).rows[0].n).toBe(0);
+  });
+});
+
+describe('group conversations with owner and admin roles',()=>{
+  type Member={id:string;user_id:string|null;agent_id:string|null;role:'owner'|'admin'|'member'};
+  const memberOf=(conversation:{members:Member[]},match:{user_id?:string;agent_id?:string})=>conversation.members.find(member=>match.user_id?member.user_id===match.user_id:member.agent_id===match.agent_id)!;
+
+  it('creates user and Agent groups with a single owner and keeps outsiders out',async()=>{
+    const created=await post(alice,'/api/v1/conversations/groups',{title:'群聊联调',member_agent_ids:[b.id]});
+    expect(created.statusCode,created.body).toBe(201);
+    const conversation=created.json();
+    expect(conversation).toMatchObject({kind:'group',title:'群聊联调',task_id:null});
+    expect(conversation.members.map((member:Member)=>member.role).sort()).toEqual(['member','owner']);
+    expect(memberOf(conversation,{user_id:alice.actor.userId}).role).toBe('owner');
+    expect(memberOf(conversation,{agent_id:b.id}).role).toBe('member');
+    expect((await post(alice,`/api/v1/conversations/${conversation.id}/messages`,{body:'欢迎加入'})).statusCode).toBe(201);
+    expect((await post(b,`/api/v1/conversations/${conversation.id}/messages`,{body:'收到'})).statusCode).toBe(201);
+    for(const other of [outsider,admin,a,sibling]) expect((await get(other,`/api/v1/conversations/${conversation.id}/messages`)).statusCode).toBe(403);
+    expect((await get(bob,'/api/v1/conversations')).json().items.map((item:{id:string})=>item.id)).toContain(conversation.id);
+    expect((await get(bob,'/api/v1/messages')).json().items).toHaveLength(2);
+    expect((await get(outsider,'/api/v1/messages')).json().items).toEqual([]);
+    const byAgent=await post(a,'/api/v1/conversations/groups',{title:'Agent 群',member_user_ids:[bob.actor.userId]});
+    expect(byAgent.statusCode,byAgent.body).toBe(201);
+    expect(memberOf(byAgent.json(),{agent_id:a.id}).role).toBe('owner');
+    expect(memberOf(byAgent.json(),{user_id:bob.actor.userId}).role).toBe('member');
+  });
+
+  it('lets only owners and admins invite members, promote roles and remove other members',async()=>{
+    const conversation=(await post(alice,'/api/v1/conversations/groups',{title:'权限测试',member_agent_ids:[b.id]})).json();
+    const owner=memberOf(conversation,{user_id:alice.actor.userId}),member=memberOf(conversation,{agent_id:b.id});
+    expect((await post(b,`/api/v1/conversations/${conversation.id}/members`,{member_user_ids:[outsider.actor.userId]})).statusCode).toBe(403);
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${conversation.id}/members/${member.id}`,{role:'admin'})).statusCode).toBe(200);
+    expect((await send(b,'PATCH',`/api/v1/conversations/${conversation.id}/members/${member.id}`,{role:'member'})).statusCode).toBe(403);
+    const invited=await post(b,`/api/v1/conversations/${conversation.id}/members`,{member_user_ids:[outsider.actor.userId]});
+    expect(invited.statusCode,invited.body).toBe(201);
+    const outsiderMember=memberOf(invited.json(),{user_id:outsider.actor.userId});
+    expect(outsiderMember.role).toBe('member');
+    const repeated=await post(b,`/api/v1/conversations/${conversation.id}/members`,{member_user_ids:[outsider.actor.userId]});
+    expect(repeated.statusCode).toBe(200);
+    expect(repeated.json().members.filter((entry:Member)=>entry.user_id===outsider.actor.userId)).toHaveLength(1);
+    expect((await send(b,'DELETE',`/api/v1/conversations/${conversation.id}/members/${owner.id}`,{})).statusCode).toBe(403);
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${conversation.id}/members/${outsiderMember.id}`,{role:'admin'})).statusCode).toBe(200);
+    expect((await send(b,'DELETE',`/api/v1/conversations/${conversation.id}/members/${outsiderMember.id}`,{})).statusCode).toBe(403);
+    expect((await send(alice,'DELETE',`/api/v1/conversations/${conversation.id}/members/${outsiderMember.id}`,{})).statusCode).toBe(200);
+    expect((await get(outsider,`/api/v1/conversations/${conversation.id}/messages`)).statusCode).toBe(403);
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${conversation.id}/members/${member.id}`,{role:'admin'})).statusCode).toBe(409);
+  });
+
+  it('renames for owners and admins, and lets members leave while history stays readable',async()=>{
+    const conversation=(await post(alice,'/api/v1/conversations/groups',{title:'改名测试',member_agent_ids:[b.id]})).json();
+    expect((await send(b,'PATCH',`/api/v1/conversations/${conversation.id}`,{title:'成员改名'})).statusCode).toBe(403);
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${conversation.id}`,{title:'成员改名'})).statusCode).toBe(200);
+    expect((await get(alice,`/api/v1/conversations/${conversation.id}`)).json().title).toBe('成员改名');
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${conversation.id}`,{title:'成员改名'})).statusCode).toBe(409);
+    expect((await post(alice,`/api/v1/conversations/${conversation.id}/messages`,{body:'保留历史'})).statusCode).toBe(201);
+    expect((await post(alice,`/api/v1/conversations/${conversation.id}/leave`,{})).statusCode).toBe(400);
+    expect((await post(b,`/api/v1/conversations/${conversation.id}/leave`,{})).statusCode).toBe(200);
+    expect((await get(b,`/api/v1/conversations/${conversation.id}/messages`)).statusCode).toBe(403);
+    expect((await get(alice,`/api/v1/conversations/${conversation.id}/messages`)).json().items.map((item:{body:string})=>item.body)).toEqual(['保留历史']);
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM conversation_members WHERE conversation_id=$1',[conversation.id])).rows[0].n).toBe(1);
+  });
+
+  it('validates invited identities, duplicate owners and replay-safe group creation',async()=>{
+    expect((await post(alice,'/api/v1/conversations/groups',{title:' '})).statusCode).toBe(400);
+    expect((await post(alice,'/api/v1/conversations/groups',{title:'无效成员',member_agent_ids:[randomUUID()]})).statusCode).toBe(404);
+    expect((await post(alice,'/api/v1/conversations/groups',{title:'重复群主',member_user_ids:[alice.actor.userId]})).statusCode).toBe(400);
+    expect((await post(alice,'/api/v1/conversations/groups',{title:'超限',member_agent_ids:Array.from({length:50},()=>randomUUID())})).statusCode).toBe(400);
+    expect((await send(alice,'PATCH',`/api/v1/conversations/${randomUUID()}`,{title:'不存在'})).statusCode).toBe(403);
+    const key=randomUUID(),payload={title:'幂等群',member_agent_ids:[b.id]};
+    const first=await post(alice,'/api/v1/conversations/groups',payload,key);
+    const replay=await post(alice,'/api/v1/conversations/groups',payload,key);
+    expect(first.statusCode,first.body).toBe(201);
+    expect(replay.json()).toEqual(first.json());
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM conversations')).rows[0].n).toBe(1);
   });
 });

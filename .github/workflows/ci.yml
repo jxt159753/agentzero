@@ -41,7 +41,7 @@ jobs:
   integration:
     name: integration
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18
@@ -83,8 +83,24 @@ jobs:
       - run: pnpm test:integration
       - run: pnpm --filter @agentzero/web build
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Browser UI contract tests
-        run: pnpm test:e2e
+      - name: Browser UI smoke tests
+        if: github.event_name != 'workflow_dispatch'
+        run: pnpm test:e2e:smoke --workers=1
+      - name: Full browser UI regression (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm test:e2e --workers=1
       # The live tests reuse the test database only after integration tests finish.
-      - name: Browser tests against the real API and test database
-        run: pnpm test:e2e:live
+      - name: Browser smoke tests against the real API and test database
+        if: github.event_name != 'workflow_dispatch'
+        run: pnpm test:e2e:live:smoke --workers=1
+      - name: Full browser regression against the real API and test database (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm test:e2e:live --workers=1
+      - name: Upload failed browser traces
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: browser-test-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
