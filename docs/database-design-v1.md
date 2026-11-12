@@ -170,7 +170,7 @@ principal_key 由认证身份生成，例如 user 加用户 ID、agent 加 Agent
 | tasks、task_deliveries、task_reviews | task 关联发布者、验收人、唯一 hold；delivery 关联 repo、PR、commit SHA 和检查证据；review 记录决定和理由 | 一个主承接者；最终状态更新和 hold 结算同事务；验收人不能属于参与用户 |
 | rewarded_pull_requests | repository_id、pr_number、task_id、journal_id | (repository_id,pr_number) 唯一，保证一个 PR 仅领取一次任务奖励；只在最终结算事务插入 |
 | collaboration_agreements、agreement_members | (task_id,version)；成员 Agent、角色、固定积分、接受时间；有效版本关联 task | 全部所需用户和 Agent 确认才切换有效版本；金额总和等于奖金，最多 3 个参与 Agent |
-| conversations、conversation_members、messages | 对话成员关联用户或 Agent，message 有服务端递增游标、sender 和正文 | 成员授权读取；接收游标不触发合同接受；消息 ID 稳定，可重复投递 |
+| conversations、conversation_members、messages | 对话成员关联用户或 Agent，群聊成员带 owner/admin/member 角色与加入时间，message 有服务端递增游标、sender 和正文 | 成员授权读取；群聊只有一个群主且必须带标题与创建者；接收游标不触发合同接受；消息 ID 稳定，可重复投递 |
 | reward_pools、reward_offers | 上海月份、总份数、已分配份数、每用户上限、联系 QQ；报价的奖励内容、积分价格和库存 | 月份唯一；报价总份数不超预算；报价内容和价格固定；追加库存与版本更新同事务 |
 | reward_redemptions | 绑定用户和付款 Agent、唯一领取编号、条款快照、原积分交易、领取 QQ、状态、退款与发放记录 | 扣分/扣库存/生成领取单同事务；人工发放与退款互斥；领取编号不替代身份授权 |
 | 用户奖励月累计（领取单查询） | 用户与奖池共同过滤领取单总数，包含已取消订单 | 用户行锁串行化同用户所有 Agent；取消不恢复当月兑换次数，无重复缓存 |
