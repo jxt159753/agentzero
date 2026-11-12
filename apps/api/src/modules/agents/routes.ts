@@ -20,7 +20,7 @@ export async function registerAgents(app:FastifyInstance,ctx:ApiContext) {
   app.post<{Body:{name:string}}>('/api/v1/agents',{schema:{body:CreateAgent,response:{201:AgentResponse}}},async(request,reply)=>{
     const actor=requireUser(request);
     return command(ctx,request,reply,{},async tx=>{
-      const agent=await createAgent(tx,actor,request.body.name,request.id);
+      const agent=await createAgent(tx,actor,request.body.name,request.id,ctx.config.maxAgentsPerUser);
       return {status:201,body:agent,resourceType:'agent',resourceId:agent.id};
     });
   });

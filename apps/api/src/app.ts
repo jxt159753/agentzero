@@ -26,6 +26,7 @@ import { registerWorld } from './modules/world/routes.js';
 import { registerContributions } from './modules/contributions/routes.js';
 import { registerGameContent, registerGames } from './modules/games/routes.js';
 import { startJobs } from './jobs.js';
+import { RequestLimits } from './rate-limit.js';
 
 export interface AppOptions { config:Config; pool?:Pool; github?:GithubProvider; repositoryGithub?:GitHubRepositoryProvider; logger?:boolean; serveWeb?:boolean; runJobs?:boolean }
 export async function buildApp(options:AppOptions) {
@@ -36,7 +37,10 @@ export async function buildApp(options:AppOptions) {
     bodyLimit:32768,
     ajv:{customOptions:{removeAdditional:false,coerceTypes:false}},
     requestIdHeader:false,
+    trustProxy:config.trustProxyHops === 1 ? (_address, hop) => hop < 1 : false,
   });
+  const limits = config.production ? new RequestLimits() : undefined;
+  app.addHook('onRequest', async (request, reply) => { limits?.request(request, reply); });
   await app.register(cookie);
   await app.register(websocket, {
     options: { maxPayload: 1024 },
@@ -47,7 +51,10 @@ export async function buildApp(options:AppOptions) {
   });
   await app.register(swagger,{openapi:{info:{title:'AgentZero world, market, rewards, collaboration, tasks and ledger API',version:'6.0.0'}}});
   app.addHook('onSend',async(request,reply,payload)=>{
-    reply.header('cache-control','no-store').header('x-content-type-options','nosniff').header('referrer-policy',request.routeOptions.url === '/game-content/:id/*' ? 'no-referrer' : 'same-origin').header('x-request-id',request.id);
+    // Match a registered static route, not a raw URL that may fall back to index.html.
+    const immutable = options.serveWeb && reply.statusCode >= 200 && reply.statusCode < 400
+      && /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[^/]+$/.test(request.routeOptions.url ?? '');
+    reply.header('cache-control',immutable ? 'public, max-age=31536000, immutable' : 'no-store').header('x-content-type-options','nosniff').header('referrer-policy',request.routeOptions.url === '/game-content/:id/*' ? 'no-referrer' : 'same-origin').header('x-request-id',request.id);
     return payload;
   });
   app.setErrorHandler<FastifyError>((error,request,reply)=>{
@@ -66,15 +73,17 @@ export async function buildApp(options:AppOptions) {
     return reply.code(status).send({error:{code,message,request_id:request.id}});
   });
   app.get('/health',async()=>{await pool.query('SELECT 1');return {status:'ok'};});
+  app.get('/api/v1/public-config', async () => ({ registration_mode: config.registrationMode ?? 'approval' }));
   await registerOAuth(app,pool,config,options.github??githubProvider(config));
   await registerGithubWebhook(app,{pool,config});
   await registerPublicAgentRegistration(app,{pool,config});
   await registerGameContent(app,{pool,config});
   await app.register(async protectedApp=>{
-    protectedApp.addHook('preHandler',async request=>{
+    protectedApp.addHook('preHandler',async (request, reply)=>{
       const auth=await authenticate(request,pool);
       verifyCsrf(request,auth,config);
       request.actor=auth.actor;
+      limits?.mutation(request, reply, auth.actor);
     });
     protectedApp.get('/api/v1/me',async request=>identityView(pool,request.actor));
     protectedApp.post('/api/v1/auth/logout',async(request,reply)=>{

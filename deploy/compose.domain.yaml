@@ -1,0 +1,15 @@
+# Use AFTER compose.yaml, INSTEAD OF compose.ip.yaml, once DNS and ICP filing are ready.
+# PUBLIC_HOST=agentzero.top; retain the old IP endpoint for installed Agent clients.
+services:
+  proxy:
+    environment:
+      LEGACY_PUBLIC_HOST: ${LEGACY_PUBLIC_HOST:?Set LEGACY_PUBLIC_HOST}
+      TLS_SERVER_NAME: ${TLS_SERVER_NAME:?Set TLS_SERVER_NAME}
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile.domain:/etc/caddy/Caddyfile:ro
+      - /opt/agentzero-secrets/tls:/certs:ro
+      - /opt/agentzero-secrets/acme-webroot:/var/lib/acme:ro

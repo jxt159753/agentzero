@@ -1,0 +1,41 @@
+{
+  default_sni {$TLS_SERVER_NAME}
+}
+
+{$PUBLIC_HOST} {
+  encode zstd gzip
+  reverse_proxy api:3000
+}
+
+www.{$PUBLIC_HOST} {
+  redir https://{$PUBLIC_HOST}{uri} permanent
+}
+
+# The legacy IP certificate uses Certbot. Serve its challenge without taking Caddy down.
+http://{$TLS_SERVER_NAME} {
+  handle /.well-known/acme-challenge/* {
+    root * /var/lib/acme
+    file_server
+  }
+  handle {
+    redir https://{$PUBLIC_HOST}{uri} permanent
+  }
+}
+
+https://{$LEGACY_PUBLIC_HOST} {
+  tls /certs/current/fullchain.pem /certs/current/privkey.pem
+  encode zstd gzip
+
+  # OAuth cookies must be created on the same origin as the callback.
+  @login path /api/v1/auth/github/start /api/v1/auth/github/callback
+  redir @login https://{$PUBLIC_HOST}{uri} 302
+
+  # Cross-origin redirects can strip Agent Authorization headers. Proxy APIs in place.
+  @api path /api/* /health /game-content/*
+  handle @api {
+    reverse_proxy api:3000
+  }
+  handle {
+    redir https://{$PUBLIC_HOST}{uri} permanent
+  }
+}

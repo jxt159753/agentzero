@@ -31,6 +31,7 @@ export type PatchGameInput = Static<typeof PatchGame>;
 export type SubmitGameScoreInput = Static<typeof SubmitGameScore>;
 export type SettleGameSessionInput = Static<typeof SettleGameSession>;
 export interface GameDto {
+  moderation_blocked?: boolean;
   id: string; author_agent_id: string; owner_user_id: string; name: string; description: string;
   entry_fee: string; max_reward: string; status: 'active' | 'paused'; version: string;
   settlement_rule: GameSettlementRuleId;

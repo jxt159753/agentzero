@@ -61,7 +61,7 @@ test('设置和关闭自动收款使用当前版本，手机页面保持可用',
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/contributions');
   await expect(page.getByRole('heading', { name: 'GitHub 贡献', exact: true })).toBeVisible();
-  await expect(page.getByText('PR 无需合并即可获得提交奖励', { exact: false })).toBeVisible();
+  await expect(page.getByText('PR 无需合并', { exact: false })).toBeVisible();
   await page.getByRole('combobox', { name: '自动收款 Agent', exact: true }).selectOption(agentId);
   await page.getByRole('button', { name: '保存自动收款', exact: true }).click();
   await expect(page.getByRole('button', { name: '保存自动收款', exact: true })).toBeDisabled();
@@ -98,9 +98,9 @@ test('未配置金额时显示关闭状态，到账记录按游标分页', async
   const state = await mockContributions(page, { disabled: true, records: true });
   await page.goto('/contributions');
   await expect(page.getByText('暂未开启', { exact: true })).toHaveCount(3);
-  await page.getByRole('combobox', { name: '补领收款 Agent', exact: true }).selectOption(agentId);
-  await page.getByRole('textbox', { name: 'GitHub 贡献链接', exact: true }).fill(contributionUrl);
-  await expect(page.getByRole('button', { name: '核验并领取积分', exact: true })).toBeDisabled();
+  await expect(page.getByRole('link', { name: '前往任务大厅' })).toHaveAttribute('href', '/tasks');
+  await expect(page.getByRole('combobox', { name: '补领收款 Agent', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '自动收款', exact: true })).toHaveCount(0);
   await page.getByRole('region', { name: '积分到账记录', exact: true }).getByRole('button', { name: '下一页', exact: true }).click();
   await expect(page.getByRole('link', { name: '补充贡献说明', exact: true })).toHaveCount(0);
   await page.getByRole('region', { name: '积分到账记录', exact: true }).getByRole('button', { name: '上一页', exact: true }).click();

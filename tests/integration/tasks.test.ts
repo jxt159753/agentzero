@@ -83,6 +83,7 @@ async function submittedTask(number = 17) {
   expect(response.statusCode, response.body).toBe(201);
   return detail(task.id);
 }
+const textTaskFields = () => ({ repository_id: null, acceptance_criteria: undefined, required_checks: undefined, reviewer_user_id: undefined });
 async function assertConserved() {
   expect((await withTransaction(pools.runtime, tx => reconcile(tx))).ok).toBe(true);
 }
@@ -114,6 +115,109 @@ beforeEach(async () => {
 afterAll(async () => { await app?.close(); await pools.runtime.end(); await pools.migration.end(); });
 
 describe('phase 2 task contracts with real PostgreSQL', () => {
+  it('publishes a text-only task and settles the publisher review exactly once without GitHub', async () => {
+    await pools.migration.query("UPDATE repositories SET status='disabled' WHERE id=$1", [repositoryId]);
+    const task = await openTask({ ...textTaskFields(), repository_id: undefined, description: '整理一份用户反馈摘要' });
+    expect(task).toMatchObject({ repository_id: null, repository: null, acceptance_criteria: '整理一份用户反馈摘要', required_checks: [], reviewer_user_id: publisher.actor.userId });
+    const listed = await app.inject({ url: '/api/v1/tasks', headers: { cookie: worker.cookie } });
+    expect(listed.json().items).toEqual([expect.objectContaining({ id: task.id, repository_id: null })]);
+    expect((await action(task.id, 'accept', worker, { agent_id: recipient.id })).statusCode).toBe(200);
+    const accepted = await detail(task.id);
+    const key = randomUUID(), payload = { version: accepted.version, content: '反馈摘要：用户希望支持纯文字任务。\n建议由发布者验收。' };
+    const submitted = await request(worker, 'POST', `/api/v1/tasks/${task.id}/deliveries`, payload, key);
+    expect(submitted.statusCode, submitted.body).toBe(201);
+    expect((await request(worker, 'POST', `/api/v1/tasks/${task.id}/deliveries`, payload, key)).json()).toEqual(submitted.json());
+    const current = await detail(task.id);
+    expect(current.deliveries).toEqual([expect.objectContaining({ content: payload.content, pr_number: null, head_sha: null, pr_url: null })]);
+    expect(current.permissions.review).toBe(true);
+    expect(await wallet(recipient.id)).toMatchObject({ available: '0' });
+    const review = { version: current.version, decision: 'accept', reason: '已审查文字成果，符合任务说明。' };
+    const reviewKey = randomUUID();
+    const settled = await request(publisher, 'POST', `/api/v1/tasks/${task.id}/reviews`, review, reviewKey);
+    expect(settled.statusCode, settled.body).toBe(200);
+    expect((await request(publisher, 'POST', `/api/v1/tasks/${task.id}/reviews`, review, reviewKey)).json()).toEqual(settled.json());
+    expect((await request(publisher, 'POST', `/api/v1/tasks/${task.id}/reviews`, review)).statusCode).toBe(200);
+    expect(await detail(task.id)).toMatchObject({ status: 'settled', reviews: [expect.objectContaining({ reviewer_user_id: publisher.actor.userId, decision: 'accept', evidence: null })] });
+    expect(await wallet(payer.id)).toMatchObject({ available: '900', reserved: '0' });
+    expect(await wallet(recipient.id)).toMatchObject({ available: '100' });
+    expect(await finalJournalCount(task.id)).toBe(1);
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM rewarded_pull_requests')).rows[0].n).toBe(0);
+    expect(evidenceReads).toBe(0);
+    await assertConserved();
+  });
+
+  it('requires text delivery and publisher approval while preserving task ownership and version checks', async () => {
+    const open = await openTask(textTaskFields());
+    const publisherAgent = await agent(pools.runtime, publisher.actor);
+    expectRejected(await action(open.id, 'accept', publisher, { agent_id: publisherAgent.id }));
+    expect((await action(open.id, 'accept', worker, { agent_id: recipient.id })).statusCode).toBe(200);
+    expectRejected(await action(open.id, 'reviews', publisher, { decision: 'accept', reason: '未交付' }));
+    for (const body of [{}, { content: '   ' }, { content: 'x'.repeat(8001) }, { pr_number: 17, head_sha: sha }, { content: '混合交付', pr_number: 17, head_sha: sha }]) {
+      expectRejected(await action(open.id, 'deliveries', worker, body));
+    }
+    expectRejected(await action(open.id, 'deliveries', outsider, { content: '非承接者的交付' }));
+    expect((await action(open.id, 'deliveries', worker, { content: '初版成果' })).statusCode).toBe(201);
+    const initial = await detail(open.id);
+    for (const user of [worker, outsider, reviewer]) {
+      expectRejected(await action(open.id, 'reviews', user, { decision: 'accept', reason: '非发布者审核' }));
+    }
+    expectRejected(await action(open.id, 'reviews', publisher, { decision: 'request_changes', reason: '请补充' }));
+    expect((await action(open.id, 'reviews', publisher, { decision: 'request_changes', reason: '请补充反馈分类', unmet_criteria: initial.acceptance_criteria })).statusCode).toBe(200);
+    expect(await wallet(payer.id)).toMatchObject({ reserved: '100' });
+    expect((await action(open.id, 'deliveries', worker, { content: '修订成果：已补充分类' })).statusCode).toBe(201);
+    const stale = await request(publisher, 'POST', `/api/v1/tasks/${open.id}/reviews`, { version: initial.version, decision: 'accept', reason: '旧版审核' });
+    expect(stale.statusCode).toBe(409);
+    expect((await action(open.id, 'reviews', publisher, { decision: 'accept', reason: '已核对修订成果' })).statusCode).toBe(200);
+    const final = await detail(open.id);
+    expect(final.deliveries).toHaveLength(2);
+    expect(final.reviews.map((review: { decision: string }) => review.decision)).toEqual(['request_changes', 'accept']);
+    expect(final.reviews[1].delivery_id).toBe(final.latest_delivery_id);
+    expect(evidenceReads).toBe(0);
+    await assertConserved();
+  });
+
+  it('allows changing a draft to text-only but prevents changing a published task contract type or reviewer', async () => {
+    const draft = await createTask();
+    const changed = await request(publisher, 'PATCH', `/api/v1/tasks/${draft.id}`, {
+      version: draft.version, repository_id: null, issue_number: null, required_checks: [], reviewer_user_id: publisher.actor.userId,
+    });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect(changed.json()).toMatchObject({ repository_id: null, reviewer_user_id: publisher.actor.userId });
+    expect((await action(draft.id, 'publish', publisher)).statusCode).toBe(200);
+    const current = await detail(draft.id);
+    for (const body of [{ repository_id: repositoryId }, { reviewer_user_id: reviewer.actor.userId }, { required_checks: ['CI'] }, { issue_number: 1 }]) {
+      expectRejected(await request(publisher, 'PATCH', `/api/v1/tasks/${draft.id}`, { version: current.version, ...body }));
+    }
+    const edited = await request(publisher, 'PATCH', `/api/v1/tasks/${draft.id}`, { version: current.version, title: '更新文字任务说明', reward_points: '80' });
+    expect(edited.statusCode, edited.body).toBe(200);
+    expect(await wallet(payer.id)).toMatchObject({ available: '920', reserved: '80' });
+    const github = await acceptedTask();
+    expectRejected(await action(github.id, 'deliveries', worker, { content: '不能用文字跳过PR要求' }));
+    expect(evidenceReads).toBe(0);
+    await assertConserved();
+  });
+
+  it('resolves disputed text work from its submitted delivery without GitHub evidence', async () => {
+    const task = await acceptedTask(textTaskFields());
+    expect((await action(task.id, 'disputes', worker, { reason: '请求裁定' })).statusCode).toBe(200);
+    const unsubmitted = await detail(task.id);
+    const resolution = { outcome: 'settled', payment_points: '100', refund_points: '0', reason: '核对文字交付后裁定完成' };
+    expectRejected(await request(admin, 'POST', `/api/v1/admin/tasks/${task.id}/resolve`, { version: unsubmitted.version, ...resolution }));
+    expect(await finalJournalCount(task.id)).toBe(0);
+    const delivered = await acceptedTask(textTaskFields());
+    expect((await action(delivered.id, 'deliveries', worker, { content: '已完成的文字成果' })).statusCode).toBe(201);
+    expect((await action(delivered.id, 'disputes', worker, { reason: '验收有分歧，请管理员介入' })).statusCode).toBe(200);
+    expectRejected(await action(delivered.id, 'reviews', publisher, { decision: 'accept', reason: '争议中普通验收' }));
+    const current = await detail(delivered.id);
+    const resolved = await request(admin, 'POST', `/api/v1/admin/tasks/${delivered.id}/resolve`, { version: current.version, ...resolution });
+    expect(resolved.statusCode, resolved.body).toBe(200);
+    expect(await detail(delivered.id)).toMatchObject({ status: 'settled', disputed: false });
+    expect(await finalJournalCount(delivered.id)).toBe(1);
+    expect(await wallet(recipient.id)).toMatchObject({ available: '100' });
+    expect(evidenceReads).toBe(0);
+    await assertConserved();
+  });
+
   it('drafts keep wallets untouched; publish and pre-acceptance edits adjust one hold atomically', async () => {
     const task = await createTask();
     expect(task.status).toBe('draft');

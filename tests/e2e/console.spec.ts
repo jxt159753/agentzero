@@ -10,7 +10,7 @@ const initialAgent = { id: agentId, name: '研究助手', status: 'active', owne
 const initialPolicy = { version: '1', can_accept_task: false, can_collaborate: false, can_trade: false, can_redeem_api: false, single_spend_limit: '0', daily_spend_limit: '0' };
 const respond = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-async function mockConsole(page: Page, options: { pending?: boolean; largeBalance?: boolean; empty?: boolean; admin?: boolean; deleted?: boolean; deleteBlocked?: boolean } = {}) {
+async function mockConsole(page: Page, options: { pending?: boolean; largeBalance?: boolean; empty?: boolean; admin?: boolean; deleted?: boolean; deleteBlocked?: boolean; recycleLostResponse?: boolean } = {}) {
   let signedIn = true;
   let agent = { ...initialAgent, deleted_at: options.deleted ? '2026-11-07T09:00:00.000Z' : null };
   let policy = { ...initialPolicy };
@@ -18,6 +18,8 @@ async function mockConsole(page: Page, options: { pending?: boolean; largeBalanc
   let keys: { id: string; label: string; expires_at: string; revoked_at: string | null; created_at: string }[] = [];
   const writes: { path: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   let limit = '0'; let issued = '0';
+  let recycled = '0', recovery = '100', lastRecycle: string | undefined;
+  let loseRecycleResponse = options.recycleLostResponse ?? false;
   await page.context().addCookies([{ name: 'az_csrf', value: 'csrf-test-token', url: 'http://localhost:5173' }]);
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
@@ -48,6 +50,12 @@ async function mockConsole(page: Page, options: { pending?: boolean; largeBalanc
     if (path === '/admin/users') return respond(route, { items: [], next_cursor: null });
     if (path.startsWith('/admin/issuance-periods/')) { if (method === 'PUT') limit = body.limit_points as string; return respond(route, { period: path.split('/').at(-1), limit_points: limit, issued_points: issued, ...(method === 'PUT' ? { operation_id: operationId } : {}) }); }
     if (path === '/admin/issuances') { issued = (BigInt(issued) + BigInt(body.amount as string)).toString(); return respond(route, { id: operationId, operation_id: operationId }); }
+    if (path === '/admin/economy') return respond(route, { user_available_points: '0', user_reserved_points: '0', reward_pool_points: (BigInt(issued) + BigInt(recycled)).toString(), reward_reserved_points: '0', recovery_points: recovery, refund_reserve_points: '40', recyclable_points: (BigInt(recovery) - 40n).toString(), total_issued_points: issued, recycled_points: recycled });
+    if (path === '/admin/recycles') {
+      if (lastRecycle !== body.business_id) { lastRecycle = String(body.business_id); recycled = (BigInt(recycled) + BigInt(body.amount as string)).toString(); recovery = (BigInt(recovery) - BigInt(body.amount as string)).toString(); }
+      if (loseRecycleResponse) { loseRecycleResponse = false; return route.abort('failed'); }
+      return respond(route, { transaction_id: operationId, operation_id: operationId });
+    }
     if (path === '/admin/ledger' || path === '/admin/audit-events') return respond(route, { items: [], next_cursor: null });
     if (path === '/admin/reconciliation') return respond(route, { ok: true, differences: [] });
     return respond(route, { error: { code: 'ACCESS_DENIED', request_id: 'hidden-resource' } }, 403);
@@ -165,6 +173,34 @@ test('管理员设置预算、发行并查看对账', async ({ page }) => {
   await page.getByRole('tab', { name: '账本与审计' }).click();
   await page.getByRole('button', { name: '生成对账报告' }).click();
   await expect(page.getByLabel('对账报告')).toContainText('"ok": true');
+});
+
+test('管理员按可回流额度补充奖励池，响应丢失后保留原请求重试', async ({ page }) => {
+  const { writes } = await mockConsole(page, { admin: true, recycleLostResponse: true });
+  await page.goto('/operations');
+  await page.getByRole('tab', { name: '发行管理' }).click();
+  const panel = page.getByRole('region', { name: '经济运行与回流' });
+  await expect(panel).toContainText('兑换退款准备金');
+  await page.getByLabel('本次回流积分').fill('70');
+  await page.getByLabel('回流用途与依据').fill('补充已审核任务预算');
+  await expect(page.getByRole('button', { name: '回流到平台奖励池' })).toBeDisabled();
+  await page.getByLabel('本次回流积分').fill('40');
+  await page.getByRole('button', { name: '回流到平台奖励池' }).click();
+  await expect(page.getByLabel('本次回流积分')).toBeDisabled();
+  await expect(panel.getByRole('alert')).toContainText('操作结果尚未确认');
+  await page.getByRole('button', { name: '按原请求重试' }).click();
+  await expect(page.getByLabel('本次回流积分')).toHaveValue('');
+  await expect(panel).toContainText('累计回流 40');
+  const attempts = writes.filter(write => write.path === '/admin/recycles');
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0]!.body).toEqual(attempts[1]!.body);
+  expect(attempts[0]!.headers['idempotency-key']).toBe(attempts[1]!.headers['idempotency-key']);
+  await page.getByRole('heading', { name: '运营管理', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '.local/public-economy-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+  await page.getByRole('heading', { name: '经济运行与回流', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '.local/public-economy-mobile.png', fullPage: true });
 });
 
 test('删除 Agent 需要确认名称，并携带当前版本与防重放信息', async ({ page }) => {

@@ -61,8 +61,9 @@ function useWorld() {
       currentSocket.onclose = event => {
         if (transitioning.current || closed || socket !== currentSocket) return;
         socket = null; received = false; setConnection('reconnecting');
-        if (event.code === 1008 && event.reason !== 'WORLD_PRESENCE_EXPIRED') { denied = true; setError(new Error('小镇会话已失效，请重新登录或重新同步。')); return; }
-        if (navigator.onLine) timer = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 10000));
+        if (event.code === 1008 && event.reason !== 'WORLD_PRESENCE_EXPIRED') { denied = true; setError(new Error(event.reason === 'WORLD_USER_CONNECTION_LIMIT' ? '当前账号的小镇连接数已达上限，请关闭其他连接后重新同步。' : '小镇会话已失效，请重新登录或重新同步。')); return; }
+        if (event.reason === 'WORLD_CAPACITY_REACHED') setError(new Error('小镇当前在线人数已满，正在等待空位并自动重连。'));
+        if (navigator.onLine) timer = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 10000) + Math.random() * 1000);
       };
     };
     const offline = () => { clearTimeout(timer); received = false; setConnection('reconnecting'); const previous = socket; socket = null; previous?.close(); };
@@ -156,7 +157,7 @@ export function WorldPage({ overlay, view = 'town' }: { overlay?: ReactNode; vie
     </> : <p>连接恢复后显示最新土地归属。</p>}</aside>}
     {builderOpen && world && <WorldBuilder lands={world.lands} userId={me.data?.user.id} selection={builderSelection} connected={fresh && !live.error} hidden={hasOverlay}
       onChange={setBuilderSelection} onClose={() => setBuilderOpen(false)} onFocus={point => focus(point, false, 1.2)} onLockedChange={setBuilderLocked} />}
-    {hasOverlay && <div className={worldStyles.featureOverlay} role="region" aria-label={detailView === 'town' ? '功能面板' : '小镇详情'}><div className={worldStyles.overlayHeading}><Link to="/world">← 回到小镇</Link><button aria-label="关闭功能面板" onClick={close}>×</button></div><div className={worldStyles.overlayContent}>{overlay ?? (fresh && world ? detailView === 'studio' ? <StudioDetail id={id} world={world} userId={me.data?.user.id} onBuild={landId => { openBuilder(landId); navigate('/world'); }} /> : <AgentProfile id={id} userId={me.data?.user.id} /> : <p>连接恢复后显示最新产权与公开成果。</p>)}</div></div>}
+    {hasOverlay && <div className={`${worldStyles.featureOverlay} ${location.pathname.startsWith('/messages') ? worldStyles.chatOverlay : ''}`} role="region" aria-label={detailView === 'town' ? '功能面板' : '小镇详情'}><div className={worldStyles.overlayHeading}><Link to="/world">← 回到小镇</Link><button aria-label="关闭功能面板" onClick={close}>×</button></div><div className={worldStyles.overlayContent}>{overlay ?? (fresh && world ? detailView === 'studio' ? <StudioDetail id={id} world={world} userId={me.data?.user.id} onBuild={landId => { openBuilder(landId); navigate('/world'); }} /> : <AgentProfile id={id} userId={me.data?.user.id} /> : <p>连接恢复后显示最新产权与公开成果。</p>)}</div></div>}
   </div>;
 }
 

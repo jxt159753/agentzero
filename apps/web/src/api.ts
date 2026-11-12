@@ -6,7 +6,9 @@ const messages: Record<string, string> = {
   REGISTRATION_CONFLICT: '注册请求已发生变化，请回到客户端重新发起注册。',
   REGISTRATION_INVALID: '注册链接无效，请从客户端打开完整链接。',
   ACCESS_DENIED: '你没有执行此操作的权限。',
-  ACCOUNT_PENDING: '账号正在等待内测准入。',
+  ACCOUNT_PENDING: '账号正在等待管理员准入。',
+  RATE_LIMITED: '请求过于频繁，请稍后重试。',
+  AGENT_LIMIT_EXCEEDED: '已达到当前平台的 Agent 数量上限，请先处理不再使用的 Agent。',
   ACCOUNT_SUSPENDED: '账号已暂停，请联系管理员。',
   AGENT_PAUSED: 'Agent 已暂停，请先恢复后再发起新操作。',
   AGENT_DELETED: 'Agent 已删除，不能再发起操作。历史账本和合同记录保留。',
@@ -120,29 +122,30 @@ export async function api<T>(path: string, options?: { method: string; body?: un
 }
 
 /** Keep the request key when a response is lost; changing the command creates a new key. */
-export function useCommand() {
-  const last = useRef<{ signature: string; key: string } | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [operationId, setOperationId] = useState<string | null>(null);
+export function useCommand(scope = '') {
+  const states = useRef(new Map<string, { last: { signature: string; key: string } | null; pending: boolean; error: Error | null; operationId: string | null }>());
+  const [, render] = useState(0);
+  if (!states.current.has(scope)) states.current.set(scope, { last: null, pending: false, error: null, operationId: null });
+  const state = states.current.get(scope)!;
+  const update = () => render(value => value + 1);
   async function run<T>(path: string, method: string, body: unknown, onSuccess?: (data: T) => void | Promise<void>) {
-    if (pending) return;
+    if (state.pending) return;
     const signature = JSON.stringify([path, method, body]);
-    if (last.current?.signature !== signature) last.current = { signature, key: crypto.randomUUID() };
-    setPending(true); setError(null); setOperationId(null);
+    if (state.last?.signature !== signature) state.last = { signature, key: crypto.randomUUID() };
+    state.pending = true; state.error = null; state.operationId = null; update();
     try {
-      const result = await api<T & { operation_id?: string }>(path, { method, body, key: last.current.key });
-      setOperationId(result.operation_id ?? null);
-      last.current = null;
+      const result = await api<T & { operation_id?: string }>(path, { method, body, key: state.last.key });
+      state.operationId = result.operation_id ?? null;
+      state.last = null;
       await onSuccess?.(result);
       return result;
     } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error('操作失败'));
-      if (!(cause instanceof ApiError && cause.uncertain)) last.current = null;
+      state.error = cause instanceof Error ? cause : new Error('操作失败');
+      if (!(cause instanceof ApiError && cause.uncertain)) state.last = null;
       return undefined;
-    } finally { setPending(false); }
+    } finally { state.pending = false; update(); }
   }
-  return { run, pending, error, operationId, requestKey: last.current?.key };
+  return { run, pending: state.pending, error: state.error, operationId: state.operationId, requestKey: state.last?.key };
 }
 
 export const queryString = (values: Record<string, string | undefined>) => {

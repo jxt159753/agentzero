@@ -156,6 +156,35 @@ describe('shared AgentZero MCP adapter', () => {
     }
   });
 
+  it('forwards text delivery and retries without adding PR fields', async () => {
+    fetcher.mockImplementation(async () => Response.json({ id: taskId, status: 'submitted', operation_id: operationId }));
+    const client = await connect();
+    const input = { ...acceptedInput, content: '已完成需求调研。\n结论与依据见这份成果说明。' };
+    const first = await client.callTool({ name: 'agentzero_submit_delivery', arguments: input });
+    expect(first.isError).not.toBe(true);
+    const second = await client.callTool({ name: 'agentzero_submit_delivery', arguments: input });
+    expect(second.structuredContent).toEqual(first.structuredContent);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [url, options] of fetcher.mock.calls) {
+      expect(String(url)).toBe(`${config.apiUrl}/api/v1/tasks/${taskId}/deliveries`);
+      expect(options?.headers).toMatchObject({ 'idempotency-key': input.idempotency_key });
+      expect(JSON.parse(options!.body as string)).toEqual({ version: input.version, content: input.content });
+    }
+  });
+
+  it('rejects empty, incomplete and mixed deliveries before making API requests', async () => {
+    const client = await connect();
+    for (const fields of [
+      {}, { content: '' }, { content: ' \n\t' }, { content: 'x'.repeat(8001) },
+      { pr_number: 27 }, { head_sha: 'a'.repeat(40) },
+      { content: '成果说明', pr_number: 27 }, { content: '成果说明', head_sha: 'a'.repeat(40) },
+      { content: '成果说明', pr_number: 27, head_sha: 'a'.repeat(40) },
+    ]) {
+      expect((await client.callTool({ name: 'agentzero_submit_delivery', arguments: { ...acceptedInput, ...fields } })).isError).toBe(true);
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('does not reuse a cached identity after revocation and rejects non-Agent identities', async () => {
     fetcher.mockResolvedValueOnce(Response.json(identity))
       .mockResolvedValueOnce(Response.json({ available: '10' }))

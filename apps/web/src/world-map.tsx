@@ -6,7 +6,8 @@ import { TownModels } from './world-3d-models';
 import { TownEnvironment } from './world-environment';
 import { sampleDaylight } from './world-daylight';
 import { TownLamps } from './world-lamps';
-import { TownRoom } from './world-room';
+import { ROOM_CEILING_HEIGHT, TownRoom } from './world-room';
+import { slideWorldMovement, worldObstacles, type WorldObstacle } from './world-collision';
 import { createAgentActivity, sampleAgentActivity, type AgentActivityPlan } from './world-agent-activity';
 import { AgentSocialActivity } from './world-agent-social';
 import { WORLD_ASSET_CREDITS } from './world-assets';
@@ -26,8 +27,7 @@ type ViewMode = 'first-person' | 'overview';
 interface Pick { kind: 'land' | 'agent' | 'visitor' | 'place' | 'room'; id: string; title: string; detail: string }
 interface Resident { node: THREE.Group; body: THREE.Group; legs: THREE.Object3D[]; arms: THREE.Object3D[]; point: WorldPoint; target: WorldPoint; signature: string; self: boolean; activity?: AgentActivityPlan; label?: HTMLDivElement; bubble?: HTMLDivElement; contact?: Pick }
 interface Label { element: HTMLDivElement; node: THREE.Object3D; height: number; always: boolean; bubble: boolean }
-interface Obstacle { minX: number; maxX: number; minY: number; maxY: number }
-const EYE_HEIGHT = 0.22, INTERACTION_DISTANCE = 2.5, PLAYER_RADIUS = 0.075;
+const EYE_HEIGHT = 0.22, INTERACTION_DISTANCE = 2.5;
 const CHAT_DISTANCE = 1;
 const LOOK_SENSITIVITY = 0.0025, MAX_LOOK_SAMPLE = 256, MAX_LOOK_STEP = Math.PI / 9;
 const directionKeys: Record<string, WorldPoint> = { ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 }, ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 } };
@@ -108,7 +108,7 @@ export default function WorldMap(props: MapProps) {
     let daylight = sampleDaylight(clockEpoch), lightTick = -1, displayedMinute = '';
     let local = { x: latest.current.world.self.x, y: latest.current.world.self.y }, target: WorldPoint | null = null;
     let center = { ...local }, zoom = latest.current.camera.zoom, follow = true, azimuth = Math.PI / 6, wantedAzimuth = azimuth;
-    let requestedZoom = zoom, obstacles: Obstacle[] = [], editingId: string | undefined, beforeEdit: ViewMode = 'first-person', previewSignature = '';
+    let requestedZoom = zoom, obstacles: WorldObstacle[] = [], editingId: string | undefined, beforeEdit: ViewMode = 'first-person', previewSignature = '';
     const previewMaterials = new Set<THREE.Material>();
     let focusRevision = -1, snapshot: WorldSnapshot | null = null, terrainSignature = '', placesSignature = '', plotSignature = '', modelRevision = 0, lampLayoutDirty = true;
     let moving = false, lastEmit = 0, emitted = quantizePoint(local), hoveredKey = '', lockPending = false, lockFailed = false, lockWanted = false;
@@ -325,15 +325,7 @@ export default function WorldMap(props: MapProps) {
         const node = buildLand(land); structures.add(node); lands.set(land.id, { node, signature }); renderer.shadowMap.needsUpdate = true; lampLayoutDirty = true;
       }
       for (const [id, entry] of lands) if (!ids.has(id)) { removeLabels(entry.node); structures.remove(entry.node); lands.delete(id); renderer.shadowMap.needsUpdate = true; lampLayoutDirty = true; }
-      obstacles = world.places.map(place => ({ minX: place.x - 0.59, maxX: place.x + 0.59, minY: place.y - 0.59, maxY: place.y + 0.59 }));
-      for (const land of world.lands) {
-        for (const item of land.models ?? []) if (!item.room_id && WORLD_MODEL_CATALOG[item.model_id].solid) {
-          const spec = WORLD_MODEL_CATALOG[item.model_id], angle = item.rotation * Math.PI / 180;
-          const halfX = (Math.abs(Math.cos(angle)) * spec.width + Math.abs(Math.sin(angle)) * spec.depth) * item.scale / 2;
-          const halfY = (Math.abs(Math.sin(angle)) * spec.width + Math.abs(Math.cos(angle)) * spec.depth) * item.scale / 2;
-          obstacles.push({ minX: land.x + item.x - halfX, maxX: land.x + item.x + halfX, minY: land.y + item.y - halfY, maxY: land.y + item.y + halfY });
-        }
-      }
+      obstacles = worldObstacles(world, actualRoom);
       if (lampLayoutDirty) { lamps.rebuild([environment.root, structures]); lampLayoutDirty = false; }
     };
     const updateRoom = (world: WorldSnapshot) => {
@@ -370,17 +362,6 @@ export default function WorldMap(props: MapProps) {
         bubble.style.visibility = shown ? 'visible' : 'hidden';
         bubble.style.transform = `translate(${Math.max(8, Math.min(width - bubble.offsetWidth - 8, x - bubble.offsetWidth / 2))}px,${Math.max(8, y - bubble.offsetHeight - 14)}px)`;
       } else if (bubble) bubble.style.visibility = 'hidden';
-    };
-    const slide = (from: WorldPoint, to: WorldPoint) => {
-      if (actualRoom) return to;
-      const inside = (point: WorldPoint, box: Obstacle) => point.x > box.minX - PLAYER_RADIUS && point.x < box.maxX + PLAYER_RADIUS && point.y > box.minY - PLAYER_RADIUS && point.y < box.maxY + PLAYER_RADIUS;
-      const blocked = (point: WorldPoint) => obstacles.some(box => !inside(from, box) && inside(point, box))
-        || (Math.hypot(from.x, from.y + 0.75) >= 0.54 && Math.hypot(point.x, point.y + 0.75) < 0.54);
-      // Resolve axes separately so a pedestrian can slide along a wall; legacy positions can leave buildings.
-      const next = { ...from };
-      if (!blocked({ x: to.x, y: next.y })) next.x = to.x;
-      if (!blocked({ x: next.x, y: to.y })) next.y = to.y;
-      return next;
     };
     const updatePreview = (current: MapProps) => {
       const land = current.world.lands.find(item => item.id === current.editingLandId), draft = current.placement;
@@ -613,11 +594,11 @@ export default function WorldMap(props: MapProps) {
       const previous = local;
       if (!gameActive.current && !current.disabled && !editingId) {
         const next = walk(local, direction, target, dt * speed / WALK_SPEED, sceneBounds(current.world));
-        local = viewMode === 'first-person' ? slide(local, next) : next;
+        local = clampPoint(slideWorldMovement(local, next, obstacles), sceneBounds(current.world));
         if (target && Math.hypot(local.x - previous.x, local.y - previous.y) < 0.00001 && Math.hypot(next.x - local.x, next.y - local.y) > 0.00001) target = null;
       }
       const arrived = target !== null && Math.hypot(target.x - local.x, target.y - local.y) < 0.001;
-      if (arrived && target) { local = { ...target }; target = null; }
+      if (arrived) target = null;
       const nowMoving = !arrived && Math.hypot(local.x - previous.x, local.y - previous.y) > 0.00001, rounded = quantizePoint(local);
       element.dataset.selfX = String(rounded.x); element.dataset.selfY = String(rounded.y);
       if ((nowMoving && now - lastEmit >= 100 && (rounded.x !== emitted.x || rounded.y !== emitted.y)) || (moving && !nowMoving) || (arrived && (rounded.x !== emitted.x || rounded.y !== emitted.y))) { lastEmit = now; emitted = rounded; current.onMove({ ...rounded, room_id: actualRoom }, nowMoving); }
@@ -635,8 +616,18 @@ export default function WorldMap(props: MapProps) {
         if (follow && Math.hypot(center.x - focus.x, center.y - focus.y) > 0.001) { center = interpolatePoint(center, focus, dt, 7); animate = true; }
         if (Math.abs(zoom - current.camera.zoom) > 0.001) { zoom += (current.camera.zoom - zoom) * (1 - Math.exp(-10 * dt)); animate = true; }
         if (Math.abs(wantedAzimuth - azimuth) > 0.001) { azimuth += (wantedAzimuth - azimuth) * (1 - Math.exp(-10 * dt)); animate = true; }
-        overviewCamera.zoom = zoom * (displayRoom ? 4 : 1); overviewCamera.updateProjectionMatrix(); overviewCamera.position.set(center.x + Math.sin(azimuth) * 25, 29, center.y + Math.cos(azimuth) * 25);
-        overviewCamera.lookAt(center.x, 0, center.y);
+        let roomZoom = 1;
+        if (displayRoom) {
+          const { width: roomWidth, height: roomDepth } = WORLD_ROOM_DIMENSIONS;
+          const sine = Math.abs(Math.sin(azimuth)), cosine = Math.abs(Math.cos(azimuth)), distance = Math.hypot(25, 29);
+          const projectedWidth = roomWidth * cosine + roomDepth * sine;
+          const projectedHeight = (roomWidth * sine + roomDepth * cosine) * 29 / distance + ROOM_CEILING_HEIGHT * 25 / distance;
+          roomZoom = Math.min(width / 54 * 0.84 / projectedWidth, height / 54 * 0.8 / projectedHeight);
+        }
+        const focusHeight = displayRoom ? ROOM_CEILING_HEIGHT / 2 : 0;
+        overviewCamera.zoom = zoom * roomZoom; overviewCamera.updateProjectionMatrix();
+        overviewCamera.position.set(center.x + Math.sin(azimuth) * 25, 29 + focusHeight, center.y + Math.cos(azimuth) * 25);
+        overviewCamera.lookAt(center.x, focusHeight, center.y);
       } else {
         walkCamera.position.set(local.x, EYE_HEIGHT + jumpHeight, local.y); walkCamera.rotation.set(pitch, yaw, 0, 'YXZ');
       }
@@ -664,6 +655,8 @@ export default function WorldMap(props: MapProps) {
       element.dataset.pointLights = String(displayRoom ? room.lightCount : lamps.update(lampFocus.x, lampFocus.y, daylight.lamps, now)); element.dataset.lampCount = String(lamps.count);
       element.dataset.roomLights = String(displayRoom ? room.lightCount : 0); element.dataset.roomShadowLights = String(displayRoom ? room.shadowLightCount : 0);
       element.dataset.roomWindowStrength = String(displayRoom ? room.windowStrength : 0);
+      element.dataset.roomWidth = String(WORLD_ROOM_DIMENSIONS.width); element.dataset.roomDepth = String(WORLD_ROOM_DIMENSIONS.height);
+      element.dataset.roomHeight = String(ROOM_CEILING_HEIGHT);
       const activitySeconds = activityTime(now), focus = viewMode === 'first-person' ? local : center;
       const participants: { id: string; plan: AgentActivityPlan }[] = [];
       if (!current.disabled && !editingId) for (const [id, actor] of actors) {

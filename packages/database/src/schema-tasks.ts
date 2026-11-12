@@ -9,7 +9,7 @@ const time=(name:string)=>timestamp(name,{withTimezone:true});
 const points=(name:string)=>bigint(name,{mode:'bigint'});
 
 export const tasks=pgTable('tasks',{
-  id:id(),title:text('title').notNull(),description:text('description').notNull(),repositoryId:uuid('repository_id').notNull().references(()=>repositories.id),
+  id:id(),title:text('title').notNull(),description:text('description').notNull(),repositoryId:uuid('repository_id').references(()=>repositories.id),
   issueNumber:integer('issue_number'),acceptanceCriteria:text('acceptance_criteria').notNull(),requiredChecks:jsonb('required_checks').notNull(),
   rewardPoints:points('reward_points').notNull(),deadlineAt:time('deadline_at').notNull(),
   publisherUserId:uuid('publisher_user_id').notNull().references(()=>users.id),publisherAgentId:uuid('publisher_agent_id').references(()=>agents.id),
@@ -23,6 +23,7 @@ export const tasks=pgTable('tasks',{
   check('tasks_title_check',sql`length(btrim(${t.title})) BETWEEN 1 AND 80`),check('tasks_description_check',sql`length(btrim(${t.description})) BETWEEN 1 AND 8000`),
   check('tasks_acceptance_criteria_check',sql`length(btrim(${t.acceptanceCriteria})) BETWEEN 1 AND 8000`),check('tasks_reward_points_check',sql`${t.rewardPoints}>0`),
   check('tasks_issue_number_check',sql`${t.issueNumber}>0`),check('tasks_required_checks_check',sql`jsonb_typeof(${t.requiredChecks})='array'`),
+  check('tasks_text_contract_check',sql`${t.repositoryId} IS NOT NULL OR (${t.issueNumber} IS NULL AND ${t.requiredChecks}='[]'::jsonb AND ${t.reviewerUserId}=${t.publisherUserId})`),
   check('tasks_version_check',sql`${t.version}>0`),check('tasks_status_check',sql`${t.status} IN ('draft','open','in_progress','submitted','changes_requested','settled','cancelled')`),
   index('tasks_list_idx').on(t.createdAt.desc(),t.id.desc()),index('tasks_publisher_idx').on(t.publisherUserId,t.status),index('tasks_assignee_idx').on(t.assigneeAgentId,t.status),
   index('tasks_reviewer_idx').on(t.reviewerUserId,t.status),index('tasks_deadline_idx').on(t.deadlineAt).where(sql`${t.status} IN ('in_progress','changes_requested') AND NOT ${t.disputed}`),
@@ -36,8 +37,9 @@ export const tasks=pgTable('tasks',{
 ]);
 export const taskDeliveries=pgTable('task_deliveries',{
   id:id(),taskId:uuid('task_id').notNull().references(():AnyPgColumn=>tasks.id),agentId:uuid('agent_id').notNull().references(()=>agents.id),
-  prNumber:integer('pr_number').notNull(),headSha:text('head_sha').notNull(),prUrl:text('pr_url').notNull(),evidence:jsonb('evidence').notNull(),createdAt:createdAt(),
-},t=>[unique('task_deliveries_task_id_id_key').on(t.taskId,t.id),index('task_deliveries_task_idx').on(t.taskId,t.createdAt),check('task_deliveries_pr_number_check',sql`${t.prNumber}>0`),check('task_deliveries_head_sha_check',sql`${t.headSha} ~ '^[0-9a-f]{40}$'`)]);
+  prNumber:integer('pr_number'),headSha:text('head_sha'),prUrl:text('pr_url'),content:text('content'),evidence:jsonb('evidence').notNull(),createdAt:createdAt(),
+},t=>[unique('task_deliveries_task_id_id_key').on(t.taskId,t.id),index('task_deliveries_task_idx').on(t.taskId,t.createdAt),check('task_deliveries_pr_number_check',sql`${t.prNumber}>0`),check('task_deliveries_head_sha_check',sql`${t.headSha} ~ '^[0-9a-f]{40}$'`),
+  check('task_deliveries_content_check',sql`(${t.content} IS NULL AND ${t.prNumber} IS NOT NULL AND ${t.headSha} IS NOT NULL AND ${t.prUrl} IS NOT NULL) OR (${t.content} IS NOT NULL AND length(btrim(${t.content})) BETWEEN 1 AND 8000 AND ${t.prNumber} IS NULL AND ${t.headSha} IS NULL AND ${t.prUrl} IS NULL)`)]);
 export const taskReviews=pgTable('task_reviews',{
   id:id(),taskId:uuid('task_id').notNull().references(()=>tasks.id),deliveryId:uuid('delivery_id'),reviewerUserId:uuid('reviewer_user_id').notNull().references(()=>users.id),
   decision:text('decision').notNull(),reason:text('reason').notNull(),unmetCriteria:text('unmet_criteria'),evidence:jsonb('evidence'),createdAt:createdAt(),

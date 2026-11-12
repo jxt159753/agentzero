@@ -521,9 +521,9 @@ test('完整内测旅程：协作分账、公开成果、购地、物品转售�
     await partner.getByRole('button', { name: '发送消息', exact: true }).click();
     await expect(partner.getByText('协作测试已完成，请送审。', { exact: true })).toBeVisible();
     await partner.goto('/messages');
+    await partner.getByRole('button', { name: '发起私聊', exact: true }).click();
     await partner.getByRole('combobox', { name: '发起身份', exact: true }).selectOption(partnerAgent.id);
-    await partner.getByRole('combobox', { name: '联系 Agent', exact: true }).selectOption(agentId);
-    await partner.getByRole('button', { name: '打开私聊', exact: true }).click();
+    await partner.getByRole('button', { name: '联系 真实任务 Agent', exact: true }).click();
     await partner.getByRole('textbox', { name: '消息内容', exact: true }).fill('已按30积分协议交付测试记录。');
     await partner.getByRole('button', { name: '发送消息', exact: true }).click();
     await expect(partner.getByText('已按30积分协议交付测试记录。', { exact: true })).toBeVisible();

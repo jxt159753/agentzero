@@ -65,6 +65,14 @@ export async function command<T extends Record<string, unknown>>(
 }
 
 export async function fund(pool: pg.Pool, administrator: Actor, targetAgentId: string, amount: string) {
+  return fundWallet(pool, administrator, { agentId: targetAgentId }, amount);
+}
+
+export async function fundUser(pool: pg.Pool, administrator: Actor, userId: string, amount: string) {
+  return fundWallet(pool, administrator, { userId }, amount);
+}
+
+async function fundWallet(pool: pg.Pool, administrator: Actor, recipient: { agentId: string } | { userId: string }, amount: string) {
   await withTransaction(pool, async (tx) => {
     await lockActor(tx, administrator, { admin: true });
     const month = (await tx.query<{ month: string }>("SELECT to_char(clock_timestamp() AT TIME ZONE 'Asia/Shanghai','YYYY-MM') AS month")).rows[0]!.month;
@@ -72,7 +80,7 @@ export async function fund(pool: pg.Pool, administrator: Actor, targetAgentId: s
     await setIssuanceLimit(tx, ctx, { month, limitPoints: '9223372036854775807', reason: 'isolated test budget' });
     await issue(tx, ctx, { businessKey: `test-issue:${randomUUID()}`, amount, reason: 'isolated test issue' });
     const hold = await reserve(tx, ctx, { businessRef: `test-reward:${randomUUID()}`, payerAgentId: null, amount, permission: 'can_accept_task', reason: 'test reward reserve' });
-    await finalizeHold(tx, ctx, { holdId: String(hold.holdId), payments: [{ agentId: targetAgentId, amount }], refund: '0', reason: 'test reward settlement' });
+    await finalizeHold(tx, ctx, { holdId: String(hold.holdId), payments: [{ ...recipient, amount }], refund: '0', reason: 'test reward settlement' });
   });
 }
 

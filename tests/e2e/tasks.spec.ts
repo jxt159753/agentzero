@@ -38,7 +38,7 @@ async function mockTasks(page: Page, role: 'publisher' | 'assignee' | 'reviewer'
     return { ...task, permissions: { ...permissions,
       edit: role === 'publisher' && ['draft', 'open'].includes(task.status), publish: role === 'publisher' && task.status === 'draft',
       accept: role === 'assignee' && task.status === 'open', submit: role === 'assignee' && ['in_progress', 'changes_requested'].includes(task.status),
-      review: role === 'reviewer' && task.status === 'submitted', cancel: role === 'publisher' && task.status === 'open',
+      review: userId === task.reviewer_user_id && task.status === 'submitted', cancel: role === 'publisher' && task.status === 'open',
       propose_cancel: role !== 'reviewer' && ['in_progress', 'submitted', 'changes_requested'].includes(task.status),
       dispute: role !== 'reviewer' && ['in_progress', 'submitted', 'changes_requested'].includes(task.status) && !task.disputed,
     } };
@@ -62,13 +62,16 @@ async function mockTasks(page: Page, role: 'publisher' | 'assignee' | 'reviewer'
     if (path === '/tasks' && method === 'GET') return respond(route, { items: [detail()], next_cursor: null });
     if (path === '/tasks' && method === 'POST') {
       task = { ...task, ...body as Partial<TaskDto>, id: taskId, status: 'draft', version: '1', hold_id: null, hold: null, events: [] };
+      if (!task.repository_id) task = { ...task, repository: null, repository_name: null, reviewer_name: '发布者' };
       return respond(route, { ...detail(), operation_id: operationId }, 201);
     }
     if (path === `/tasks/${taskId}` && method === 'GET') return respond(route, detail());
     if (path === `/tasks/${taskId}/publish`) { update({ status: 'open', hold_id: holdId, hold: { id: holdId, status: 'open', reserved_total: task.reward_points, captured_total: '0', released_total: '0', remaining: task.reward_points } }); return respond(route, { ...detail(), operation_id: operationId }); }
     if (path === `/tasks/${taskId}/accept`) { update({ status: 'in_progress', assignee_agent_id: agentId, assignee_name: '开发 Agent', accepted_at: timestamp }); return respond(route, { ...detail(), operation_id: operationId }); }
     if (path === `/tasks/${taskId}/deliveries`) {
-      const delivery = { id: deliveryId, task_id: taskId, agent_id: agentId, pr_number: Number(body.pr_number), head_sha: String(body.head_sha), pr_url: `https://github.com/example/agent-project/pull/${body.pr_number}`, evidence: { merged: true, fetchedAt: timestamp, checks: [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'build', status: 'completed', conclusion: 'success' }] }, created_at: timestamp };
+      const delivery = { id: deliveryId, task_id: taskId, agent_id: agentId, created_at: timestamp, ...(task.repository_id
+        ? { pr_number: Number(body.pr_number), head_sha: String(body.head_sha), pr_url: `https://github.com/example/agent-project/pull/${body.pr_number}`, evidence: { merged: true, fetchedAt: timestamp, checks: [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'build', status: 'completed', conclusion: 'success' }] } }
+        : { pr_number: null, head_sha: null, pr_url: null, content: String(body.content), evidence: {} }) };
       update({ status: 'submitted', deliveries: [delivery], latest_delivery_id: deliveryId, review_due_at: '2099-11-17T10:00:00.000Z' });
       return respond(route, { ...detail(), operation_id: operationId });
     }
@@ -86,6 +89,7 @@ test('创建任务草稿保留大整数金额，确认发布后显示冻结与�
   const { writes } = await mockTasks(page);
   await page.goto('/tasks');
   await page.getByRole('link', { name: '+ 创建任务' }).click();
+  await page.getByRole('combobox', { name: '任务类型', exact: true }).selectOption('github');
   await page.getByLabel('任务标题').fill('测试大整数任务奖励');
   await page.getByLabel('任务目标与说明').fill('验证真实交付后完整结算。');
   await page.getByLabel('获准仓库').selectOption(repositoryId);
@@ -110,6 +114,71 @@ test('创建任务草稿保留大整数金额，确认发布后显示冻结与�
     expect(write.headers['idempotency-key']).toMatch(/^[a-f\d-]{36}$/);
   }
   await page.screenshot({ path: 'test-results/task-published-desktop.png', fullPage: true });
+});
+
+test('默认纯文字任务无需仓库和额外验收条件即可发布', async ({ page }) => {
+  const { writes } = await mockTasks(page);
+  let githubOptionRequests = 0;
+  await page.route(/\/api\/v1\/(repositories|task-reviewers)$/, async (route) => {
+    githubOptionRequests++;
+    return respond(route, { items: [] });
+  });
+  await page.goto('/tasks/new');
+  await expect(page.getByRole('combobox', { name: '任务类型', exact: true })).toHaveValue('text');
+  await expect(page.getByLabel('获准仓库')).toHaveCount(0);
+  await expect(page.getByLabel('指定验收人', { exact: true })).toHaveCount(0);
+  await page.getByLabel('任务标题').fill('整理活动安排');
+  await page.getByLabel('任务目标与说明').fill('给出三天活动的文字安排。');
+  await page.getByLabel('固定奖金', { exact: true }).fill('100');
+  await page.getByLabel('截止时间（北京时间）').fill('2099-11-14T18:00');
+  await page.getByLabel('奖金来源').selectOption('platform');
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect(page).toHaveURL(`/tasks/${taskId}`);
+  await expect(page.getByText('纯文字任务', { exact: true })).toBeVisible();
+  await page.getByRole('checkbox', { name: /已核对合同/ }).check();
+  await page.getByRole('button', { name: '发布并冻结奖金' }).click();
+  await expect(page.getByText('待接单', { exact: true })).toBeVisible();
+  expect(writes.find((write) => write.path === '/tasks')?.body).toMatchObject({
+    repository_id: null, issue_number: null, required_checks: [], reviewer_user_id: publisherId,
+    description: '给出三天活动的文字安排。', acceptance_criteria: '给出三天活动的文字安排。',
+  });
+  expect(githubOptionRequests).toBe(0);
+});
+
+test('纯文字任务提交成果后展示文字内容并等待审核', async ({ page }) => {
+  const { writes } = await mockTasks(page, 'assignee', {
+    repository_id: null, repository_name: null, repository: null, issue_number: null,
+    required_checks: [], reviewer_user_id: publisherId, reviewer_name: '发布者',
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/tasks/${taskId}`);
+  await page.getByRole('combobox', { name: '承接 Agent', exact: true }).selectOption(agentId);
+  await page.getByRole('button', { name: '确认接单' }).click();
+  await expect(page.getByLabel('PR 编号', { exact: true })).toHaveCount(0);
+  await page.getByLabel('交付内容', { exact: true }).fill('第一天：需求讨论\n第二天：现场活动\n第三天：总结交流');
+  await page.getByRole('button', { name: '提交成果', exact: true }).click();
+  await expect(page.getByText('待验收', { exact: true })).toBeVisible();
+  await expect(page.getByText('第一天：需求讨论\n第二天：现场活动\n第三天：总结交流', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('task-held-points')).toHaveText('100 积分');
+  expect(writes.find((write) => write.path.endsWith('/deliveries'))?.body).toEqual({ version: '3', content: '第一天：需求讨论\n第二天：现场活动\n第三天：总结交流' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('纯文字任务由发布者审核通过后完成结算', async ({ page }) => {
+  const { writes } = await mockTasks(page, 'publisher', {
+    repository_id: null, repository_name: null, repository: null, issue_number: null, required_checks: [],
+    reviewer_user_id: publisherId, reviewer_name: '发布者', status: 'submitted', assignee_agent_id: agentId,
+    deliveries: [{ id: deliveryId, task_id: taskId, agent_id: agentId, pr_number: null, head_sha: null, pr_url: null, content: '活动安排已完成。', evidence: {}, created_at: timestamp }],
+  });
+  await page.goto(`/tasks/${taskId}`);
+  await expect(page.getByText('活动安排已完成。', { exact: true })).toBeVisible();
+  await expect(page.getByText(/通过前核验 PR/)).toHaveCount(0);
+  await page.getByLabel('验收说明', { exact: true }).fill('安排符合任务说明，审核通过。');
+  await page.getByRole('checkbox', { name: /已核对成果/ }).check();
+  await page.getByRole('button', { name: '验收通过并结算' }).click();
+  await expect(page.getByText('已结算', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('task-held-points')).toHaveText('0 积分');
+  expect(writes.find((write) => write.path.endsWith('/reviews'))?.body).toMatchObject({ version: '2', decision: 'accept', reason: '安排符合任务说明，审核通过。' });
 });
 
 test('Agent 接单提交完整 PR 版本，窄屏显示核验记录与冻结状态', async ({ page }) => {

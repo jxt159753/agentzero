@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor, AddWorldModelInput, DeleteWorldModelInput, PatchWorldModelInput, WorldLandGeometry, WorldModelPlacement } from '@agentzero/contracts';
+import type { Actor, AddWorldModelInput, AdminAssetActionInput, DeleteWorldModelInput, PatchWorldModelInput, WorldLandGeometry, WorldModelPlacement } from '@agentzero/contracts';
 import { WORLD_MODEL_LIMIT, isWorldRoom, worldModelFits, worldRoomFits } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError, audit, type CommandResult } from '../../core.js';
+import { cancelAssetListing, loadLand } from '../market/service.js';
 
-interface EditableLand extends WorldLandGeometry { id: string; owner_user_id: string | null; owner_agent_id: string | null; version: string }
+interface EditableLand extends WorldLandGeometry { id: string; owner_user_id: string | null; owner_agent_id: string | null; version: string; showcase_hidden: boolean }
 const placementFields = 'id,model_id,x,y,rotation,scale,room_id,version::text';
 
 async function editableLand(tx: Tx, actor: Actor, id: string) {
-  const land = (await tx.query<EditableLand>('SELECT id,x,y,area,width,height,owner_user_id,owner_agent_id,version::text FROM land_plots WHERE id=$1 FOR UPDATE', [id])).rows[0];
+  const land = (await tx.query<EditableLand>('SELECT id,x,y,area,width,height,owner_user_id,owner_agent_id,showcase_hidden,version::text FROM land_plots WHERE id=$1 FOR UPDATE', [id])).rows[0];
   if (!land) throw new AppError('NOT_FOUND', 404, '地块不存在');
   if (actor.type === 'system' || land.owner_user_id !== (actor.type === 'user' ? actor.userId : actor.ownerUserId)
     || actor.type === 'agent' && land.owner_agent_id !== actor.agentId) throw new AppError('ACCESS_DENIED', 403, '只能布置自己拥有或当前 Agent 管理的地块');
+  if (land.showcase_hidden) throw new AppError('CONTENT_MODERATED', 409, '此地块展示已被管理员屏蔽，恢复前不能修改模型');
   if ((await tx.query("SELECT id FROM market_listings WHERE land_id=$1 AND status='active'", [id])).rowCount)
     throw new AppError('ASSET_LISTED', 409, '地块挂牌期间不能修改模型布置');
   return land;
@@ -67,12 +69,23 @@ export async function patchWorldModel(tx: Tx, actor: Actor, requestId: string, l
 
 export async function deleteWorldModel(tx: Tx, actor: Actor, requestId: string, landId: string, id: string, input: DeleteWorldModelInput): Promise<CommandResult> {
   await editableLand(tx, actor, landId);
+  return removeModel(tx, actor, requestId, landId, id, input);
+}
+
+export async function adminDeleteWorldModel(tx: Tx, actor: Actor, requestId: string, landId: string, id: string, input: AdminAssetActionInput): Promise<CommandResult> {
+  const land = await loadLand(tx, landId, true);
+  // Removal invalidates an existing quote, but never transfers or deletes paid inventory.
+  await cancelAssetListing(tx, actor, requestId, land.active_listing_id, input.reason);
+  return removeModel(tx, actor, requestId, landId, id, input, input.reason);
+}
+
+async function removeModel(tx: Tx, actor: Actor, requestId: string, landId: string, id: string, input: DeleteWorldModelInput, reason?: string): Promise<CommandResult> {
   const model = await placement(tx, landId, id);
   version(model.version, input.version);
   if ((await tx.query('SELECT id FROM world_model_placements WHERE room_id=$1 LIMIT 1', [id])).rowCount)
     throw new AppError('WORLD_ROOM_NOT_EMPTY', 409, '请先移除房屋内的物品，再移除房屋');
   await tx.query('DELETE FROM world_model_placements WHERE id=$1', [id]);
   const landVersion = await bumpLand(tx, landId);
-  await audit(tx, actor, 'world.model_removed', 'land', landId, requestId, { placement_id: id, model_id: model.model_id });
+  await audit(tx, actor, reason ? 'admin.world_model_removed' : 'world.model_removed', 'land', landId, requestId, { placement_id: id, model_id: model.model_id, ...(reason ? { reason, previous_version: model.version } : {}) });
   return { status: 200, body: { deleted: true, id, land_version: landVersion }, resourceType: 'world_model_placement', resourceId: id };
 }

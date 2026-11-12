@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { IdParams,PageQuery,Month,UserStatusChange,IssuanceLimit,Issue } from '@agentzero/contracts';
+import { IdParams,PageQuery,Month,UserStatusChange,IssuanceLimit,Issue,Recycle,AdminWalletAdjustment,type AdminWalletAdjustmentInput,type AdminWalletDto } from '@agentzero/contracts';
 import { withTransaction } from '@agentzero/database';
 import { AppError,audit,decodeCursor,lockActor,paginated,principal } from '../../core.js';
 import { command,requireUser,type ApiContext } from '../../http.js';
-import { issue,reconcile,setIssuanceLimit } from '../ledger/service.js';
+import { adminAdjustWallet,economySnapshot,issue,reconcile,recycle,setIssuanceLimit } from '../ledger/service.js';
 type Page={cursor?:string;limit?:number};
 const userFields='id,github_user_id,github_login,display_name,avatar_url,status,role,created_at,updated_at';
 export async function registerOperations(app:FastifyInstance,ctx:ApiContext) {
@@ -18,10 +18,13 @@ export async function registerOperations(app:FastifyInstance,ctx:ApiContext) {
     }
     return {id:operation.id,status:operation.response_status,result:operation.response_body,resource_type:operation.resource_type,resource_id:operation.resource_id};
   }));
-  app.get<{Querystring:Page & {status?:string}}>('/api/v1/admin/users',{schema:{querystring:Type.Intersect([PageQuery,Type.Object({status:Type.Optional(Type.Union([Type.Literal('pending'),Type.Literal('active'),Type.Literal('suspended')]))})])}},async request=>withTransaction(ctx.pool,async tx=>{
+  app.get<{Querystring:Page & {status?:string;q?:string}}>('/api/v1/admin/users',{schema:{querystring:Type.Intersect([PageQuery,Type.Object({status:Type.Optional(Type.Union([Type.Literal('pending'),Type.Literal('active'),Type.Literal('suspended')])),q:Type.Optional(Type.String({maxLength:100}))})])}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{admin:true});
     const c=decodeCursor(request.query.cursor),n=Number(request.query.limit??30);
-    return paginated((await tx.query(`SELECT ${userFields} FROM users WHERE ($1::text IS NULL OR status=$1) AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT $4`,[request.query.status??null,c?.[0]??null,c?.[1]??null,n+1])).rows,n);
+    const q=request.query.q?.trim(),search=q?`%${q.replace(/[\\%_]/g,'\\$&')}%`:null;
+    return paginated((await tx.query(`SELECT ${userFields} FROM users WHERE ($1::text IS NULL OR status=$1) AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid))
+      AND ($5::text IS NULL OR github_login ILIKE $5 OR display_name ILIKE $5 OR id::text=$6)
+      ORDER BY created_at DESC,id DESC LIMIT $4`,[request.query.status??null,c?.[0]??null,c?.[1]??null,n+1,search,q?.toLowerCase()??null])).rows,n);
   }));
   app.get<{Params:{id:string}}>('/api/v1/admin/users/:id',{schema:{params:IdParams}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{admin:true});
@@ -37,6 +40,33 @@ export async function registerOperations(app:FastifyInstance,ctx:ApiContext) {
       if(!user) throw new AppError('NOT_FOUND',404);
       await audit(tx,actor,'user.status_changed','user',id,request.id,{status:request.body.status,reason:request.body.reason});
       return {status:200,body:user,resourceType:'user',resourceId:id};
+    });
+  });
+  app.get<{Params:{id:string}}>('/api/v1/admin/users/:id/wallets',{schema:{params:IdParams}},async request=>withTransaction(ctx.pool,async tx=>{
+    const id=request.params.id.toLowerCase();
+    await lockActor(tx,request.actor,{admin:true,userIds:[id]});
+    if(!(await tx.query('SELECT id FROM users WHERE id=$1',[id])).rowCount) throw new AppError('NOT_FOUND',404);
+    const wallets=(await tx.query<AdminWalletDto>(`SELECT 'user' AS type,u.id,u.display_name AS name,u.status,NULL::text AS deleted_at,
+        a.balance::text AS available,r.balance::text AS reserved FROM users u
+        JOIN ledger_accounts a ON a.user_id=u.id AND a.bucket='USER_AVAILABLE'
+        JOIN ledger_accounts r ON r.user_id=u.id AND r.bucket='USER_RESERVED' WHERE u.id=$1
+      UNION ALL SELECT 'agent',ag.id,ag.name,ag.status,ag.deleted_at::text,a.balance::text,r.balance::text FROM agents ag
+        JOIN ledger_accounts a ON a.agent_id=ag.id AND a.bucket='AVAILABLE'
+        JOIN ledger_accounts r ON r.agent_id=ag.id AND r.bucket='RESERVED' WHERE ag.owner_user_id=$1
+      ORDER BY type DESC,name,id`,[id])).rows;
+    const reward=(await tx.query("SELECT balance::text FROM ledger_accounts WHERE system_key='REWARD_POOL'")).rows[0];
+    return {user_id:id,wallets,reward_pool_points:reward.balance};
+  }));
+  app.post<{Body:AdminWalletAdjustmentInput}>('/api/v1/admin/wallet-adjustments',{schema:{body:AdminWalletAdjustment}},async(request,reply)=>{
+    const actor=requireUser(request),wallet={...request.body.wallet,id:request.body.wallet.id.toLowerCase()};
+    // Resolve the immutable owner before command() locks both users in UUID order.
+    const owner=wallet.type==='user'?wallet.id:(await ctx.pool.query<{owner_user_id:string}>('SELECT owner_user_id FROM agents WHERE id=$1',[wallet.id])).rows[0]?.owner_user_id;
+    return command(ctx,request,reply,{admin:true,userIds:owner?[owner]:[]},async tx=>{
+      if(!owner) throw new AppError('NOT_FOUND',404);
+      const result=await adminAdjustWallet(tx,{actor,requestId:request.id},{wallet,ownerUserId:owner,direction:request.body.direction,
+        amount:request.body.amount,reason:request.body.reason.trim(),businessKey:`admin-adjustment:${actor.userId}:${request.body.business_id.toLowerCase()}`});
+      return {status:201,body:{transaction_id:result.transactionId,business_key:result.businessKey,wallet:result.wallet,
+        owner_user_id:result.owner_user_id,direction:result.direction,amount:result.amount,reason:result.reason,created:result.created},resourceType:'journal',resourceId:result.transactionId};
     });
   });
   app.get<{Params:{month:string}}>('/api/v1/admin/issuance-periods/:month',{schema:{params:Type.Object({month:Month})}},async request=>withTransaction(ctx.pool,async tx=>{
@@ -55,6 +85,17 @@ export async function registerOperations(app:FastifyInstance,ctx:ApiContext) {
     return command(ctx,request,reply,{admin:true},async tx=>{
       const result=await issue(tx,{actor:request.actor,requestId:request.id},{month:request.body.month.slice(0,7),amount:request.body.amount,reason:request.body.reason,businessKey:`issuance:${request.body.business_id}`});
       return {status:201,body:{id:result.transactionId,transaction_id:result.transactionId,business_key:result.businessKey,amount:result.amount,period:result.period,created:result.created},resourceType:'journal',resourceId:result.transactionId};
+    });
+  });
+  app.get('/api/v1/admin/economy',async request=>withTransaction(ctx.pool,async tx=>{
+    await lockActor(tx,request.actor,{admin:true});
+    return economySnapshot(tx);
+  }));
+  app.post<{Body:{amount:string;reason:string;business_id:string}}>('/api/v1/admin/recycles',{schema:{body:Recycle}},async(request,reply)=>{
+    requireUser(request);
+    return command(ctx,request,reply,{admin:true},async tx=>{
+      const result=await recycle(tx,{actor:request.actor,requestId:request.id},{amount:request.body.amount,reason:request.body.reason,businessKey:`recycle:${request.body.business_id}`});
+      return {status:201,body:{transaction_id:result.transactionId,business_key:result.businessKey,amount:result.amount,created:result.created},resourceType:'journal',resourceId:result.transactionId};
     });
   });
   const filterSchema=Type.Intersect([PageQuery,Type.Object({account_id:Type.Optional(Type.String({format:'uuid'})),agent_id:Type.Optional(Type.String({format:'uuid'})),user_id:Type.Optional(Type.String({format:'uuid'})),business_key:Type.Optional(Type.String({maxLength:240}))})]);

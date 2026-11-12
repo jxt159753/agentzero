@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
+import { economySnapshot } from '../apps/api/src/modules/ledger/service.js';
 
 export interface ReportSource {
   environment: 'test' | 'development' | 'production';
@@ -88,13 +89,14 @@ export async function readOperationsReport(pool: pg.Pool, source: ReportSource) 
         WHERE j.kind='INITIAL_GRANT' AND e.side='debit') AS initial_grant_points,
       (SELECT coalesce(sum(balance),0)::text FROM ledger_accounts WHERE bucket='USER_AVAILABLE') AS user_available_points,
       coalesce(sum(e.amount) FILTER(WHERE a.system_key='RECOVERY' AND e.side='debit'),0)::text AS recovered_gross_points,
-      coalesce(sum(e.amount) FILTER(WHERE a.system_key='RECOVERY' AND e.side='credit'),0)::text AS refunded_points,
+      coalesce(sum(e.amount) FILTER(WHERE a.system_key='RECOVERY' AND e.side='credit' AND j.kind='REFUND'),0)::text AS refunded_points,
       coalesce(sum(CASE WHEN e.side='debit' THEN e.amount ELSE -e.amount END) FILTER(WHERE a.system_key='RECOVERY'),0)::text AS recovered_net_points,
       (SELECT coalesce(sum(balance),0)::text FROM ledger_accounts WHERE bucket='AVAILABLE') AS agent_available_points,
       (SELECT coalesce(sum(balance),0)::text FROM ledger_accounts WHERE bucket IN ('RESERVED','USER_RESERVED','REWARD_RESERVED')) AS reserved_points,
       (SELECT balance::text FROM ledger_accounts WHERE system_key='REWARD_POOL') AS reward_pool_available_points,
       (SELECT count(*)::text FROM audit_events WHERE action='ledger.quarantined') AS quarantine_records
-      FROM journal_entries e JOIN ledger_accounts a ON a.id=e.account_id`)).rows[0];
+      FROM journal_entries e JOIN ledger_accounts a ON a.id=e.account_id JOIN journal_transactions j ON j.id=e.transaction_id`)).rows[0];
+    const economy = await economySnapshot(tx);
     const rewards = (await tx.query(`SELECT status,count(*)::text AS claims,
       sum(points_cost)::text AS points, count(*) FILTER(WHERE fulfilled_at IS NOT NULL AND fulfillment_reference IS NOT NULL)::text AS recorded_fulfillments
       FROM reward_redemptions GROUP BY status ORDER BY status`)).rows;
@@ -111,7 +113,7 @@ export async function readOperationsReport(pool: pg.Pool, source: ReportSource) 
         provenance: 'Environment labels identify the connection, not whether each historical action was real. Keep fixtures in the test database.',
         fulfillment: 'Operator records do not independently verify offline payment.' },
       configuration: { issuance, reward_pool: rewardPool, reward_offers: rewardOffers, land_supply: landSupply, item_supply: itemSupply },
-      participation, tasks, market, ledger, rewards, webhooks,
+      participation, tasks, market, ledger, economy, rewards, webhooks,
       failed_transactions: { count: null, source: 'structured_request_logs',
         note: 'Rejected commands roll back their receipts. Group Request rejected/Request failed by route and error_code, then check request_id and business receipts; request retries are not distinct failed transactions.' },
     };

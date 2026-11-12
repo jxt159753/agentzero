@@ -9,8 +9,8 @@ import { collaborationDetail,mayConfirm,participantAgent,participantOwnerIds,set
 
 export type TaskRow = TaskDto & {
   assignee_owner_user_id:string|null; assignee_github_id:string|null; payer_owner_user_id:string|null;
-  github_repository_id:string; installation_id:string; repository_owner:string; repository_slug:string;
-  installation_status:string; repository_status:string; overdue:boolean;
+  github_repository_id:string|null; installation_id:string|null; repository_owner:string|null; repository_slug:string|null;
+  installation_status:string|null; repository_status:string|null; overdue:boolean;
   active_agreement_id:string|null;participant_agent_ids:string[];participant_owner_user_ids:string[];
 };
 export const taskSelect=`SELECT t.*, a.owner_user_id AS assignee_owner_user_id,u.github_user_id::text AS assignee_github_id,
@@ -20,7 +20,7 @@ export const taskSelect=`SELECT t.*, a.owner_user_id AS assignee_owner_user_id,u
   t.deadline_at<=clock_timestamp() AS overdue,ca.id AS active_agreement_id,
   COALESCE(members.agent_ids,ARRAY_REMOVE(ARRAY[a.id],NULL)) AS participant_agent_ids,
   COALESCE(members.owner_ids,ARRAY_REMOVE(ARRAY[a.owner_user_id],NULL)) AS participant_owner_user_ids
-  FROM tasks t JOIN repositories r ON r.id=t.repository_id JOIN github_installations i ON i.installation_id=r.installation_id
+  FROM tasks t LEFT JOIN repositories r ON r.id=t.repository_id LEFT JOIN github_installations i ON i.installation_id=r.installation_id
   JOIN users pu ON pu.id=t.publisher_user_id JOIN users ru ON ru.id=t.reviewer_user_id
   LEFT JOIN agents a ON a.id=t.assignee_agent_id LEFT JOIN users u ON u.id=a.owner_user_id LEFT JOIN agents payer ON payer.id=t.payer_agent_id
   LEFT JOIN collaboration_agreements ca ON ca.task_id=t.id AND ca.status='active'
@@ -56,10 +56,17 @@ export function requireReviewer(task:TaskRow,actor:Actor) {
 export function requireBeforeDeadline(task:TaskRow) {
   if(task.overdue) throw new AppError('TASK_DEADLINE_PASSED',409,'任务已到期，请申请管理员处理');
 }
-export function validateFields(input:CreateTaskInput) {
+export function validateFields(input:CreateTaskInput,publisherUserId:string) {
+  const fields={...input,repository_id:input.repository_id??null,acceptance_criteria:input.acceptance_criteria??input.description,
+    required_checks:input.required_checks??[],reviewer_user_id:input.reviewer_user_id??publisherUserId};
   parseAmount(input.reward_points,true);
   if(new Date(input.deadline_at).getTime()<=Date.now()) throw new AppError('INVALID_REQUEST',400,'截止时间必须晚于现在');
-  if(new Set(input.required_checks.map(name=>name.trim())).size!==input.required_checks.length) throw new AppError('INVALID_REQUEST',400,'检查项不能重复');
+  if(new Set(fields.required_checks.map(name=>name.trim())).size!==fields.required_checks.length) throw new AppError('INVALID_REQUEST',400,'检查项不能重复');
+  if(!fields.repository_id) {
+    if(fields.issue_number!=null||fields.required_checks.length) throw new AppError('INVALID_REQUEST',400,'纯文字任务不能设置 GitHub Issue 或检查项');
+    if(fields.reviewer_user_id!==publisherUserId) throw new AppError('INVALID_REVIEWER',400,'纯文字任务由发布者本人验收');
+  }
+  return fields;
 }
 export async function validateReviewer(tx:Tx,id:string,assigneeOwner?:string|null) {
   const reviewer=(await tx.query('SELECT status FROM users WHERE id=$1',[id])).rows[0];
@@ -82,6 +89,11 @@ export function taskBody(task:TaskRow):Record<string,unknown> {
     repository_owner:_f,repository_slug:_g,installation_status:_h,repository_status:_i,overdue:_j,participant_agent_ids:_k,participant_owner_user_ids:_l,...body}=task;
   return body;
 }
+export async function markTaskDisputed(tx:Tx,task:TaskRow,actor:Actor,requestId:string,reason:string,kind:'disputed'|'admin_intervened'='disputed') {
+  await tx.query("UPDATE task_cancellation_proposals SET status='superseded' WHERE task_id=$1 AND status='pending'",[task.id]);
+  await tx.query('UPDATE tasks SET disputed=true,dispute_reason=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[task.id,reason]);
+  await taskEvent(tx,task,actor,requestId,kind,{reason});
+}
 export function taskResult(task:TaskRow,status=200):CommandResult {return {status,body:taskBody(task),resourceType:'task',resourceId:task.id};}
 export function verifyEvidence(task:TaskRow,evidence:PullRequestEvidence,prNumber:number,headSha:string,settlement=false) {
   if(evidence.repositoryId!==task.github_repository_id||evidence.number!==prNumber||evidence.headSha!==headSha) throw new AppError('PR_VERSION_CHANGED',409,'PR 仓库或提交版本已变化，请重新提交成果');
@@ -98,16 +110,16 @@ export function verifyEvidence(task:TaskRow,evidence:PullRequestEvidence,prNumbe
 export async function finishTask(tx:Tx,task:TaskRow,actor:Actor,requestId:string,input:{payment:string;refund:string;reason:string;outcome:'settled'|'cancelled';evidence?:PullRequestEvidence;payments?:Payment[]}) {
   const paid=parseAmount(input.payment),refund=parseAmount(input.refund);
   if(paid+refund!==BigInt(task.reward_points)||(!task.assignee_agent_id&&paid>0n)) throw new AppError('INVALID_SETTLEMENT',400,'报酬与退款之和必须等于冻结奖金');
-  if(input.outcome==='settled'&&(!input.evidence||paid!==BigInt(task.reward_points)||refund!==0n)) throw new AppError('INVALID_SETTLEMENT',400,'完成任务须支付全部约定奖金');
+  if(input.outcome==='settled'&&((task.repository_id&&!input.evidence)||paid!==BigInt(task.reward_points)||refund!==0n)) throw new AppError('INVALID_SETTLEMENT',400,'完成任务须支付全部约定奖金');
   const payments=await settlementPayments(tx,task,input.payment,input.payments,input.outcome);
-  if(input.outcome==='settled') {
+  if(input.outcome==='settled'&&task.repository_id) {
     // Lock by stable repository + PR, not by request key; different tasks cannot both reward one PR.
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`rewarded-pr:${task.repository_id}:${input.evidence!.number}`]);
     const rewarded=(await tx.query('SELECT task_id FROM rewarded_pull_requests WHERE repository_id=$1 AND pr_number=$2',[task.repository_id,input.evidence!.number])).rows[0];
     if(rewarded) throw new AppError('PR_ALREADY_REWARDED',409,'此 PR 已获得另一任务的奖励');
   }
   const result=await finalizeHold(tx,{actor:{type:'system'},requestId},{holdId:task.hold_id!,payments:payments.filter(p=>BigInt(p.amount_points)>0n).map(p=>({agentId:p.agent_id,amount:p.amount_points})),refund:input.refund,reason:input.reason});
-  if(input.outcome==='settled') await tx.query('INSERT INTO rewarded_pull_requests(repository_id,pr_number,task_id,journal_id) VALUES($1,$2,$3,$4)',[task.repository_id,input.evidence!.number,task.id,result.transactionId]);
+  if(input.outcome==='settled'&&task.repository_id) await tx.query('INSERT INTO rewarded_pull_requests(repository_id,pr_number,task_id,journal_id) VALUES($1,$2,$3,$4)',[task.repository_id,input.evidence!.number,task.id,result.transactionId]);
   await tx.query("UPDATE task_cancellation_proposals SET status='superseded' WHERE task_id=$1 AND status='pending'",[task.id]);
   await tx.query("UPDATE collaboration_agreements SET status='superseded' WHERE task_id=$1 AND status='pending'",[task.id]);
   await tx.query(`UPDATE tasks SET status=$2,version=version+1,settled_journal_id=$3,disputed=false,dispute_reason=NULL,finalized_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`,[task.id,input.outcome,result.transactionId]);
@@ -117,19 +129,22 @@ export async function taskDetail(tx:Tx,task:TaskRow,actor:Actor) {
   const admin=await isAdmin(tx,actor),publisher=isPublisher(task,actor),assignee=isAssignee(task,actor),final=isFinal(task);
   const participant=isParticipant(task,actor),reviewer=actor.type==='user'&&actor.userId===task.reviewer_user_id&&!participantOwnerIds(task).includes(actor.userId);
   const mutable=!final&&!task.disputed;
+  const independentAdmin=admin&&actor.type==='user'&&!participantOwnerIds(task).includes(actor.userId);
   const permission={edit:publisher&&['draft','open'].includes(task.status),publish:publisher&&task.status==='draft',
     accept:task.status==='open'&&!task.overdue&&userId(actor)!==task.reviewer_user_id,
     submit:assignee&&mutable&&['in_progress','changes_requested'].includes(task.status)&&!task.overdue,
     review:reviewer&&mutable&&task.status==='submitted',cancel:publisher&&task.status==='open',
     propose_cancel:participant&&mutable&&!!task.assignee_agent_id,dispute:participant&&!final&&!!task.assignee_agent_id,
-    resolve:admin&&task.disputed&&!final&&actor.type==='user'&&!participantOwnerIds(task).includes(actor.userId),
+    resolve:independentAdmin&&task.disputed&&!final,
+    admin_cancel:independentAdmin&&mutable&&task.status==='open',
+    admin_intervene:independentAdmin&&mutable&&!!task.assignee_agent_id&&['in_progress','submitted','changes_requested'].includes(task.status),
     propose_agreement:assignee&&mutable&&['in_progress','changes_requested'].includes(task.status)&&!task.overdue,
     contribute:!!participantAgent(task,actor)&&mutable&&['in_progress','changes_requested','submitted'].includes(task.status)&&!task.overdue,
     discuss:participant||reviewer||admin};
   const hold=task.hold_id?(await tx.query('SELECT id,status,reserved_total,captured_total,released_total,(reserved_total-captured_total-released_total)::text AS remaining FROM credit_holds WHERE id=$1',[task.hold_id])).rows[0]:null;
-  const deliveries=(await tx.query('SELECT id,task_id,agent_id,pr_number,head_sha,pr_url,evidence,created_at FROM task_deliveries WHERE task_id=$1 ORDER BY created_at DESC,id DESC',[task.id])).rows;
+  const deliveries=(await tx.query('SELECT id,task_id,agent_id,pr_number,head_sha,pr_url,content,evidence,created_at FROM task_deliveries WHERE task_id=$1 ORDER BY created_at DESC,id DESC',[task.id])).rows;
   const reviews=(await tx.query('SELECT id,task_id,delivery_id,reviewer_user_id,decision,reason,unmet_criteria,evidence,created_at FROM task_reviews WHERE task_id=$1 ORDER BY created_at,id',[task.id])).rows;
   const proposals=(await tx.query('SELECT * FROM task_cancellation_proposals WHERE task_id=$1 ORDER BY created_at DESC,id DESC',[task.id])).rows.map(row=>({...row,can_accept:mutable&&row.status==='pending'&&row.confirmations.some((confirmation:import('@agentzero/contracts').ConfirmationDto)=>!confirmation.accepted_at&&mayConfirm(task,actor,confirmation))}));
   const events=(await tx.query<TaskEventDto>('SELECT * FROM task_events WHERE task_id=$1 ORDER BY created_at,id',[task.id])).rows;
-  return {...taskBody(task),...await collaborationDetail(tx,task,actor),repository:{id:task.repository_id,full_name:task.repository_name,status:task.repository_status,installation_status:task.installation_status},hold,deliveries,reviews,cancellation_proposals:proposals,events,permissions:permission};
+  return {...taskBody(task),...await collaborationDetail(tx,task,actor),repository:task.repository_id?{id:task.repository_id,full_name:task.repository_name,status:task.repository_status,installation_status:task.installation_status}:null,hold,deliveries,reviews,cancellation_proposals:proposals,events,permissions:permission};
 }

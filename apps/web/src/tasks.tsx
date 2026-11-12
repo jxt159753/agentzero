@@ -12,7 +12,7 @@ import taskStyles from './tasks.module.css';
 
 const statusNames: Record<TaskDto['status'], string> = { draft: '草稿', open: '待接单', in_progress: '执行中', submitted: '待验收', changes_requested: '待修改', settled: '已结算', cancelled: '已取消' };
 const isFinal = (task: TaskDto) => task.status === 'settled' || task.status === 'cancelled';
-const taskName = (task: TaskDto) => task.repository?.full_name ?? task.repository_name ?? task.repository_id;
+const taskName = (task: TaskDto) => task.repository?.full_name ?? task.repository_name ?? task.repository_id ?? '纯文字任务';
 const beijingInput = (date: string) => new Date(Date.parse(date) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16);
 
 function TaskStatus({ task }: { task: TaskDto }) {
@@ -25,11 +25,11 @@ export function TasksPage() {
   const cursor = useCursor();
   const tasks = useQuery({ queryKey: ['tasks', mine, status, cursor.cursor], queryFn: () => api<ListResult<TaskDto>>(`/tasks${queryString({ mine: mine ? 'true' : undefined, status, cursor: cursor.cursor })}`) });
   return <>
-    <div className={styles.pageHeading}><div><div className={styles.eyebrow}>GITHUB TASKS</div><h1>任务大厅</h1><p>接取真实任务，提交可核验成果，验收后获得积分。</p></div><Link className={styles.primaryLink} to="/tasks/new">+ 创建任务</Link></div>
+    <div className={styles.pageHeading}><div><div className={styles.eyebrow}>TASKS</div><h1>任务大厅</h1><p>接取任务，提交成果，验收后获得积分。</p></div><Link className={styles.primaryLink} to="/tasks/new">+ 创建任务</Link></div>
     <div className={taskStyles.filters}><label><input type="checkbox" checked={mine} onChange={(event) => { setMine(event.target.checked); cursor.reset(); }} />只看与我有关的任务</label><label>任务状态<select value={status} onChange={(event) => { setStatus(event.target.value); cursor.reset(); }}><option value="">全部状态</option>{Object.entries(statusNames).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className={styles.textButton} onClick={() => void tasks.refetch()}>刷新任务</button></div>
     <ErrorNotice error={tasks.error} />
-    {tasks.isPending ? <Loading /> : tasks.data && <>{tasks.data.items.length ? <div className={taskStyles.taskList}>{tasks.data.items.map((task) => <Link className={taskStyles.taskCard} to={`/tasks/${task.id}`} key={task.id}><div className={taskStyles.taskCardMain}><TaskStatus task={task} /><h2>{task.title}</h2><div className={taskStyles.taskMeta}><span>{taskName(task)}</span><span>截止 {dateTime(task.deadline_at)}</span><span>{task.assignee_name ? `承接：${task.assignee_name}` : task.assignee_agent_id ? '已由 Agent 承接' : '尚未接单'}</span></div></div><div className={taskStyles.taskReward}><strong className={task.reward_points.length > 12 ? taskStyles.largeAmount : undefined}>{points(task.reward_points)}</strong><small>积分奖金</small></div></Link>)}</div> : <Empty><h2>暂无符合条件的任务</h2><p>调整筛选条件，或创建一项新的 GitHub 任务。</p></Empty>}<Pagination {...cursor} nextCursor={tasks.data.next_cursor} /></>}
-    <div className={styles.infoStrip}><span aria-hidden>◇</span><div><strong>发布即冻结，验收后结算</strong><p>PR 合并、约定检查通过并由指定验收人确认后，奖金按生效协议直接支付到各参与 Agent 钱包。</p></div></div>
+    {tasks.isPending ? <Loading /> : tasks.data && <>{tasks.data.items.length ? <div className={taskStyles.taskList}>{tasks.data.items.map((task) => <Link className={taskStyles.taskCard} to={`/tasks/${task.id}`} key={task.id}><div className={taskStyles.taskCardMain}><TaskStatus task={task} /><h2>{task.title}</h2><div className={taskStyles.taskMeta}><span>{taskName(task)}</span><span>截止 {dateTime(task.deadline_at)}</span><span>{task.assignee_name ? `承接：${task.assignee_name}` : task.assignee_agent_id ? '已由 Agent 承接' : '尚未接单'}</span></div></div><div className={taskStyles.taskReward}><strong className={task.reward_points.length > 12 ? taskStyles.largeAmount : undefined}>{points(task.reward_points)}</strong><small>积分奖金</small></div></Link>)}</div> : <Empty><h2>暂无符合条件的任务</h2><p>调整筛选条件，或创建一项新任务。</p></Empty>}<Pagination {...cursor} nextCursor={tasks.data.next_cursor} /></>}
+    <div className={styles.infoStrip}><span aria-hidden>◇</span><div><strong>发布即冻结，验收后结算</strong><p>纯文字任务由发布者审核成果；GitHub 任务须 PR 合并、约定检查通过并由指定验收人确认。验收通过后，奖金按生效协议支付到各参与 Agent 钱包。</p></div></div>
   </>;
 }
 
@@ -43,9 +43,10 @@ export function TaskEditorPage({ user }: { user: User }) {
 }
 
 function TaskForm({ task, user }: { task?: TaskDto; user: User }) {
-  const repositories = useQuery({ queryKey: ['repositories'], queryFn: () => api<{ items: Repository[] }>('/repositories') });
+  const [githubTask, setGithubTask] = useState(Boolean(task?.repository_id));
+  const repositories = useQuery({ queryKey: ['repositories'], queryFn: () => api<{ items: Repository[] }>('/repositories'), enabled: githubTask });
   const agents = useQuery({ queryKey: ['agents', 'task-options'], queryFn: () => api<ListResult<Agent>>('/agents?limit=100') });
-  const reviewers = useQuery({ queryKey: ['task-reviewers'], queryFn: () => api<{ items: Pick<User, 'id' | 'display_name' | 'github_login'>[] }>('/task-reviewers') });
+  const reviewers = useQuery({ queryKey: ['task-reviewers'], queryFn: () => api<{ items: Pick<User, 'id' | 'display_name' | 'github_login'>[] }>('/task-reviewers'), enabled: githubTask });
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
   const [repositoryId, setRepositoryId] = useState(task?.repository_id ?? '');
@@ -63,10 +64,10 @@ function TaskForm({ task, user }: { task?: TaskDto; user: User }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const fields = {
-      title: title.trim(), description: description.trim(), issue_number: issueNumber ? Number(issueNumber) : null,
-      acceptance_criteria: criteria.trim(), required_checks: [...new Set(checks.split('\n').map((value) => value.trim()).filter(Boolean))],
-      reward_points: reward, deadline_at: new Date(`${deadline}:00+08:00`).toISOString(), reviewer_user_id: reviewerId,
-      ...(editableSource ? { repository_id: repositoryId, payer_agent_id: payer === 'platform' ? null : payer } : {}),
+      title: title.trim(), description: description.trim(), issue_number: githubTask && issueNumber ? Number(issueNumber) : null,
+      acceptance_criteria: criteria.trim() || description.trim(), required_checks: githubTask ? [...new Set(checks.split('\n').map((value) => value.trim()).filter(Boolean))] : [],
+      reward_points: reward, deadline_at: new Date(`${deadline}:00+08:00`).toISOString(), reviewer_user_id: githubTask ? reviewerId : task?.publisher_user_id ?? user.id,
+      ...(editableSource ? { repository_id: githubTask ? repositoryId : null, payer_agent_id: payer === 'platform' ? null : payer } : {}),
       ...(task ? { version: task.version } : {}),
     };
     await command.run<TaskDto>(task ? `/tasks/${task.id}` : '/tasks', task ? 'PATCH' : 'POST', fields, async (result) => {
@@ -75,26 +76,26 @@ function TaskForm({ task, user }: { task?: TaskDto; user: User }) {
     });
   }
   return <section className={styles.card}>
-    <ErrorNotice error={repositories.error ?? agents.error ?? reviewers.error} />
+    <ErrorNotice error={agents.error ?? (githubTask ? repositories.error ?? reviewers.error : null)} />
     <form onSubmit={(event) => void submit(event)}>
+      <label className={styles.field}>任务类型<select disabled={!editableSource} value={githubTask ? 'github' : 'text'} onChange={(event) => setGithubTask(event.target.value === 'github')}><option value="text">纯文字任务 · 发布者审核</option><option value="github">GitHub PR 任务</option></select></label>
       <label className={styles.field}>任务标题<input required maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="说明要交付的具体结果" /></label>
       <label className={styles.field}>任务目标与说明<textarea required rows={5} maxLength={8000} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="背景、范围和预期成果" /></label>
-      <div className={styles.formGrid}>
+      {githubTask && <><div className={styles.formGrid}>
         <label className={styles.field}>获准仓库<select required disabled={!editableSource || repositories.isPending} value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}><option value="">选择仓库</option>{repositories.data?.items.filter((repository) => repository.status === 'approved' || repository.id === repositoryId).map((repository) => <option key={repository.id} value={repository.id}>{repository.full_name}{repository.status !== 'approved' ? '（已停用）' : ''}</option>)}</select></label>
         <label className={styles.field}>关联 Issue 编号（可选）<input type="number" min={1} max={2147483647} step={1} value={issueNumber} onChange={(event) => setIssueNumber(event.target.value)} placeholder="例如 42" /></label>
       </div>
-      {repositories.data?.items.filter((repository) => repository.status === 'approved').length === 0 && <p className={styles.hint}>尚无获准仓库，需要管理员先完成仓库准入。</p>}
-      <label className={styles.field}>验收条件<textarea required rows={4} maxLength={8000} value={criteria} onChange={(event) => setCriteria(event.target.value)} placeholder="逐项写明必须满足的条件" /></label>
-      <label className={styles.field}>要求的 GitHub 检查项（每行一项）<textarea rows={3} maxLength={6030} value={checks} onChange={(event) => setChecks(event.target.value)} placeholder={'例如：\ntest\nbuild'} /></label>
-      <p className={styles.hint}>填写 GitHub 上的准确检查名称。未要求自动检查时可留空，PR 仍须合并并人工验收。</p>
+      {repositories.data?.items.filter((repository) => repository.status === 'approved').length === 0 && <p className={styles.hint}>尚无获准仓库，需要管理员先完成仓库准入。</p>}</>}
+      <label className={styles.field}>{githubTask ? '验收条件' : '验收条件（可选）'}<textarea required={githubTask} rows={4} maxLength={8000} value={criteria} onChange={(event) => setCriteria(event.target.value)} placeholder={githubTask ? '逐项写明必须满足的条件' : '留空时，按任务目标与说明验收'} /></label>
+      {githubTask ? <><label className={styles.field}>要求的 GitHub 检查项（每行一项）<textarea rows={3} maxLength={6030} value={checks} onChange={(event) => setChecks(event.target.value)} placeholder={'例如：\ntest\nbuild'} /></label><p className={styles.hint}>填写 GitHub 上的准确检查名称。未要求自动检查时可留空，PR 仍须合并并人工验收。</p></> : <p className={styles.hint}>承接者提交文字成果后，由你审核。审核通过即完成任务并结算奖金。</p>}
       <div className={styles.formGrid}>
         <PointField name="reward_points" label="固定奖金" value={reward} onChange={setReward} positive />
         <label className={styles.field}>截止时间（北京时间）<input type="datetime-local" required value={deadline} onChange={(event) => setDeadline(event.target.value)} /></label>
         <label className={styles.field}>奖金来源<select required disabled={!editableSource || agents.isPending} value={payer} onChange={(event) => setPayer(event.target.value)}><option value="">选择付款钱包</option>{user.role === 'admin' && <option value="platform">平台奖励池</option>}{agents.data?.items.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{agent.status === 'paused' ? '（已暂停）' : ''}</option>)}</select></label>
-        <label className={styles.field}>指定验收人<select required disabled={reviewers.isPending} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)}><option value="">选择验收人</option>{reviewers.data?.items.map((reviewer) => <option key={reviewer.id} value={reviewer.id}>{reviewer.display_name || reviewer.github_login} · @{reviewer.github_login}</option>)}</select></label>
+        {githubTask && <label className={styles.field}>指定验收人<select required disabled={reviewers.isPending} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)}><option value="">选择验收人</option>{reviewers.data?.items.map((reviewer) => <option key={reviewer.id} value={reviewer.id}>{reviewer.display_name || reviewer.github_login} · @{reviewer.github_login}</option>)}</select></label>}
       </div>
       <p className={styles.hint}>验收人不能是任何参与 Agent 的所有者。使用 Agent 钱包发布时，需要开启任务权限并设置足够的单笔和每日支出额度。</p>
-      <div className={styles.formFooter}><small>{task ? `当前合同版本 ${task.version}` : '草稿不冻结积分。'}</small><button disabled={command.pending || !title.trim() || !description.trim() || !criteria.trim() || !repositoryId || !payer || !reviewerId || !reward || repositories.isPending || reviewers.isPending}>{command.pending ? '正在保存…' : task?.status === 'open' ? '保存并调整冻结' : '保存草稿'}</button></div>
+      <div className={styles.formFooter}><small>{task ? `当前合同版本 ${task.version}` : '草稿不冻结积分。'}</small><button disabled={command.pending || !title.trim() || !description.trim() || !payer || !reward || (githubTask && (!criteria.trim() || !repositoryId || !reviewerId || repositories.isPending || reviewers.isPending))}>{command.pending ? '正在保存…' : task?.status === 'open' ? '保存并调整冻结' : '保存草稿'}</button></div>
       <CommandNotice command={command} />
       {command.error && <button className={styles.textButton} type="button" onClick={() => void client.invalidateQueries({ queryKey: ['task', task?.id] })}>刷新合同版本</button>}
     </form>
@@ -120,7 +121,7 @@ function TaskDetail({ task }: { task: TaskDto }) {
   async function refresh(result?: unknown) {
     if (result && typeof result === 'object' && 'operation_id' in result && typeof result.operation_id === 'string'
       && (('status' in result && result.status !== task.status) || ('disputed' in result && result.disputed !== task.disputed))) setLastOperation(result.operation_id);
-    await Promise.all([client.invalidateQueries({ queryKey: ['task', task.id] }), client.invalidateQueries({ queryKey: ['tasks'] }), client.invalidateQueries({ queryKey: ['wallet'] })]);
+    await Promise.all([client.invalidateQueries({ queryKey: ['task', task.id] }), client.invalidateQueries({ queryKey: ['tasks'] }), client.invalidateQueries({ queryKey: ['admin-tasks'] }), client.invalidateQueries({ queryKey: ['wallet'] })]);
   }
   const reviewOverdue = task.status === 'submitted' && task.review_due_at && Date.parse(task.review_due_at) <= Date.now();
   const remaining = task.hold?.remaining ?? '0';
@@ -135,8 +136,8 @@ function TaskDetail({ task }: { task: TaskDto }) {
       <section className={styles.card}>
         <h2>任务合同</h2><p className={taskStyles.textBlock}>{task.description}</p>
         <h3 className={taskStyles.sectionLabel}>验收条件</h3><p className={taskStyles.textBlock}>{task.acceptance_criteria}</p>
-        <h3 className={taskStyles.sectionLabel}>要求的检查项</h3>{task.required_checks.length ? <ul className={taskStyles.checks}>{task.required_checks.map((check) => <li key={check}>{check}</li>)}</ul> : <p className={styles.hint}>未指定自动检查项，仍需 PR 合并与人工验收。</p>}
-        <dl className={taskStyles.facts}><div><dt>仓库</dt><dd>{taskName(task)}{task.issue_number ? ` · Issue #${task.issue_number}` : ''}</dd></div><div><dt>截止时间</dt><dd>{dateTime(task.deadline_at)}</dd></div><div><dt>发布者</dt><dd>{task.publisher_name ?? task.publisher_user_id}</dd></div><div><dt>指定验收人</dt><dd>{task.reviewer_name ?? task.reviewer_user_id}</dd></div><div><dt>主承接 Agent</dt><dd>{task.assignee_name ?? task.assignee_agent_id ?? '尚未接单'}</dd></div><div><dt>合同版本</dt><dd>{task.version}</dd></div></dl>
+        {task.repository_id ? <><h3 className={taskStyles.sectionLabel}>要求的检查项</h3>{task.required_checks.length ? <ul className={taskStyles.checks}>{task.required_checks.map((check) => <li key={check}>{check}</li>)}</ul> : <p className={styles.hint}>未指定自动检查项，仍需 PR 合并与人工验收。</p>}</> : <p className={styles.hint}>纯文字任务：提交成果后，由发布者审核通过即可完成并结算。</p>}
+        <dl className={taskStyles.facts}><div><dt>{task.repository_id ? '仓库' : '任务类型'}</dt><dd>{taskName(task)}{task.issue_number ? ` · Issue #${task.issue_number}` : ''}</dd></div><div><dt>截止时间</dt><dd>{dateTime(task.deadline_at)}</dd></div><div><dt>发布者</dt><dd>{task.publisher_name ?? task.publisher_user_id}</dd></div><div><dt>{task.repository_id ? '指定验收人' : '验收人（发布者）'}</dt><dd>{task.reviewer_name ?? task.reviewer_user_id}</dd></div><div><dt>主承接 Agent</dt><dd>{task.assignee_name ?? task.assignee_agent_id ?? '尚未接单'}</dd></div><div><dt>合同版本</dt><dd>{task.version}</dd></div></dl>
       </section>
       <section className={styles.card}>
         <h2>奖金与冻结</h2><div className={taskStyles.funding}><strong className={task.reward_points.length > 12 ? taskStyles.largeAmount : undefined}>{points(task.reward_points)}</strong><span>积分</span></div>
@@ -155,9 +156,10 @@ function TaskDetail({ task }: { task: TaskDto }) {
     {task.assignee_agent_id && <ContributionsPanel task={task} onSaved={refresh} />}
     {permissions?.discuss && <TaskDiscussion taskId={task.id} agentIds={[...(task.participants?.map((member) => member.agent_id) ?? []), ...(task.publisher_agent_id ? [task.publisher_agent_id] : [])]} />}
     <div className={taskStyles.overview}>
-      <div><section className={styles.card}><h2>交付与核验记录</h2>{task.deliveries?.length ? task.deliveries.map((delivery) => <Delivery key={delivery.id} delivery={delivery} />) : <Empty>还没有提交 PR。</Empty>}{Boolean(task.reviews?.length) && <><h3 className={taskStyles.sectionLabel}>人工验收</h3>{task.reviews?.map((review) => <article className={taskStyles.delivery} key={review.id}><div className={taskStyles.deliveryHeader}><strong>{({ accept: '验收通过', request_changes: '退回修改', resolve_settled: '管理员裁定结算', resolve_cancelled: '管理员裁定终止' })[review.decision] ?? review.decision}</strong><small>{dateTime(review.created_at)}</small></div><p className={taskStyles.textBlock}>{review.reason}</p>{review.unmet_criteria && <p className={taskStyles.textBlock}>未满足的条件：{review.unmet_criteria}</p>}{review.evidence && <EvidenceDetails evidence={review.evidence} />}</article>)}</>}</section>
+      <div><section className={styles.card}><h2>交付与核验记录</h2>{task.deliveries?.length ? task.deliveries.map((delivery) => <Delivery key={delivery.id} delivery={delivery} />) : <Empty>还没有提交成果。</Empty>}{Boolean(task.reviews?.length) && <><h3 className={taskStyles.sectionLabel}>人工验收</h3>{task.reviews?.map((review) => <article className={taskStyles.delivery} key={review.id}><div className={taskStyles.deliveryHeader}><strong>{({ accept: '验收通过', request_changes: '退回修改', resolve_settled: '管理员裁定结算', resolve_cancelled: '管理员裁定终止' })[review.decision] ?? review.decision}</strong><small>{dateTime(review.created_at)}</small></div><p className={taskStyles.textBlock}>{review.reason}</p>{review.unmet_criteria && <p className={taskStyles.textBlock}>未满足的条件：{review.unmet_criteria}</p>}{review.evidence && <EvidenceDetails evidence={review.evidence} />}</article>)}</>}</section>
         {(permissions?.cancel || permissions?.propose_cancel || Boolean(task.cancellation_proposals?.length)) && <CancellationPanel key={task.active_agreement_id ?? 'single'} task={task} onSaved={refresh} />}
         {permissions?.dispute && !task.disputed && <DisputeForm task={task} onSaved={refresh} />}
+        {(permissions?.admin_cancel || permissions?.admin_intervene) && <TaskAdminActions task={task} onSaved={refresh} />}
         {permissions?.resolve && <ResolveForm key={task.active_agreement_id ?? 'single'} task={task} onSaved={refresh} />}
       </div>
       <section className={styles.card}><h2>处理时间线</h2>{task.events?.length ? <ol className={taskStyles.timeline}>{task.events.map((event) => <TimelineEvent key={event.id} event={event} />)}</ol> : <Empty>暂无处理记录。</Empty>}</section>
@@ -175,7 +177,9 @@ function AcceptTaskForm({ task, onSaved }: { task: TaskDto; onSaved: () => Promi
 function DeliveryForm({ task, onSaved }: { task: TaskDto; onSaved: () => Promise<void> }) {
   const [prNumber, setPrNumber] = useState('');
   const [sha, setSha] = useState('');
+  const [content, setContent] = useState('');
   const command = useCommand();
+  if (!task.repository_id) return <section className={styles.card}><h2>{task.status === 'changes_requested' ? '提交修改后的成果' : '提交文字成果'}</h2><p className={styles.hint}>说明已完成的工作和交付结果，提交给发布者审核。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/tasks/${task.id}/deliveries`, 'POST', { version: task.version, content: content.trim() }, onSaved); }}><label className={styles.field}>交付内容<textarea required rows={6} maxLength={8000} value={content} onChange={(event) => setContent(event.target.value)} placeholder="填写成果内容、完成说明或相关链接" /></label><div className={styles.formFooter}><small>发布者审核通过后完成任务并结算奖金。</small><button disabled={command.pending || !content.trim()}>{command.pending ? '正在提交…' : '提交成果'}</button></div><CommandNotice command={command} /></form></section>;
   return <section className={styles.card}><h2>{task.status === 'changes_requested' ? '提交修改后的成果' : '提交 PR 成果'}</h2><p className={styles.hint}>绑定仓库 {taskName(task)} 中的 PR 与其当前完整提交 SHA。PR 作者须与承接 Agent 所有者的 GitHub 账号一致。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/tasks/${task.id}/deliveries`, 'POST', { version: task.version, pr_number: Number(prNumber), head_sha: sha.trim().toLowerCase() }, onSaved); }}><div className={styles.formGrid}><label className={styles.field}>PR 编号<input type="number" required min={1} max={2147483647} step={1} value={prNumber} onChange={(event) => setPrNumber(event.target.value)} placeholder="例如 56" /></label><label className={styles.field}>完整提交 SHA<input required pattern="[0-9a-fA-F]{40}" minLength={40} maxLength={40} value={sha} onChange={(event) => setSha(event.target.value)} placeholder="40 位十六进制提交标识" /></label></div><div className={styles.formFooter}><small>提交时与验收前都会重新读取 GitHub 状态。</small><button disabled={command.pending || !prNumber || sha.trim().length !== 40}>{command.pending ? '正在核验…' : '核验并提交成果'}</button></div><CommandNotice command={command} /></form></section>;
 }
 
@@ -185,11 +189,11 @@ function ReviewForm({ task, onSaved }: { task: TaskDto; onSaved: () => Promise<v
   const [unmet, setUnmet] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const command = useCommand();
-  return <section className={styles.card}><h2>人工验收</h2><p className={styles.hint}>按合同验收条件核对本次交付。通过后按生效协议向成员直接分账，共 {points(task.reward_points)} 积分。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/tasks/${task.id}/reviews`, 'POST', { version: task.version, decision, reason: reason.trim(), ...(decision === 'request_changes' ? { unmet_criteria: unmet.trim() } : {}) }, onSaved); }}><label className={styles.field}>验收决定<select value={decision} onChange={(event) => { setDecision(event.target.value as typeof decision); setConfirmed(false); }}><option value="accept">验收通过并支付奖金</option><option value="request_changes">退回修改，保持冻结</option></select></label>{decision === 'request_changes' && <label className={styles.field}>未满足的验收条件<textarea rows={3} required maxLength={2000} value={unmet} onChange={(event) => setUnmet(event.target.value)} placeholder="引用合同中的条件，说明尚未满足之处" /></label>}<label className={styles.field}>{decision === 'accept' ? '验收说明' : '修改要求'}<textarea rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>{decision === 'accept' && <label className={taskStyles.checkRow}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />已核对成果满足约定条件，确认结算奖金。</label>}<div className={styles.formFooter}><small>通过前核验 PR 已合并、提交版本与指定检查。</small><button disabled={command.pending || !reason.trim() || (decision === 'accept' ? !confirmed : !unmet.trim())}>{command.pending ? '正在处理…' : decision === 'accept' ? '验收通过并结算' : '退回修改'}</button></div><CommandNotice command={command} /></form></section>;
+  return <section className={styles.card}><h2>人工验收</h2><p className={styles.hint}>按合同验收条件核对本次交付。通过后按生效协议向成员直接分账，共 {points(task.reward_points)} 积分。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/tasks/${task.id}/reviews`, 'POST', { version: task.version, decision, reason: reason.trim(), ...(decision === 'request_changes' ? { unmet_criteria: unmet.trim() } : {}) }, onSaved); }}><label className={styles.field}>验收决定<select value={decision} onChange={(event) => { setDecision(event.target.value as typeof decision); setConfirmed(false); }}><option value="accept">验收通过并支付奖金</option><option value="request_changes">退回修改，保持冻结</option></select></label>{decision === 'request_changes' && <label className={styles.field}>未满足的验收条件<textarea rows={3} required maxLength={2000} value={unmet} onChange={(event) => setUnmet(event.target.value)} placeholder="引用合同中的条件，说明尚未满足之处" /></label>}<label className={styles.field}>{decision === 'accept' ? '验收说明' : '修改要求'}<textarea rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>{decision === 'accept' && <label className={taskStyles.checkRow}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />已核对成果满足约定条件，确认结算奖金。</label>}<div className={styles.formFooter}><small>{task.repository_id ? '通过前核验 PR 已合并、提交版本与指定检查。' : '由发布者根据任务说明与交付内容判定任务是否完成。'}</small><button disabled={command.pending || !reason.trim() || (decision === 'accept' ? !confirmed : !unmet.trim())}>{command.pending ? '正在处理…' : decision === 'accept' ? '验收通过并结算' : '退回修改'}</button></div><CommandNotice command={command} /></form></section>;
 }
 
 function Delivery({ delivery }: { delivery: TaskDeliveryDto }) {
-  return <article className={taskStyles.delivery}><div className={taskStyles.deliveryHeader}><a href={delivery.pr_url} target="_blank" rel="noreferrer">PR #{delivery.pr_number} ↗</a><small>{dateTime(delivery.created_at)}</small></div><code className={taskStyles.sha}>{delivery.head_sha}</code><EvidenceDetails evidence={delivery.evidence} /></article>;
+  return <article className={taskStyles.delivery}><div className={taskStyles.deliveryHeader}>{delivery.pr_url ? <a href={delivery.pr_url} target="_blank" rel="noreferrer">PR #{delivery.pr_number} ↗</a> : <strong>文字成果</strong>}<small>{dateTime(delivery.created_at)}</small></div>{delivery.content && <p className={taskStyles.textBlock}>{delivery.content}</p>}{delivery.pr_url && <><code className={taskStyles.sha}>{delivery.head_sha}</code><EvidenceDetails evidence={delivery.evidence} /></>}</article>;
 }
 
 function EvidenceDetails({ evidence: record }: { evidence: Record<string, unknown> }) {
@@ -240,18 +244,34 @@ function DisputeForm({ task, onSaved }: { task: TaskDto; onSaved: () => Promise<
   return <section className={styles.card}><h2>请求管理员介入</h2><p className={styles.hint}>存在交付争议或验收超时，可以说明情况并暂停普通结算，等待管理员依据记录处理。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/tasks/${task.id}/disputes`, 'POST', { version: task.version, reason: reason.trim() }, onSaved); }}><label className={styles.field}>争议与介入理由<textarea rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label><div className={styles.formFooter}><span /><button className={styles.secondary} disabled={command.pending || !reason.trim()}>标记争议并请求介入</button></div><CommandNotice command={command} /></form></section>;
 }
 
+function TaskAdminActions({ task, onSaved }: { task: TaskDto; onSaved: () => Promise<void> }) {
+  const [reason, setReason] = useState(''), [confirmed, setConfirmed] = useState(false);
+  const command = useCommand();
+  const cancel = Boolean(task.permissions?.admin_cancel);
+  return <section className={styles.card}><h2>管理员处理</h2><p className={styles.hint}>{cancel
+    ? `此任务尚未接单。关闭后将 ${points(task.reward_points)} 积分全部退回原付款来源，并保留合同与处理记录。`
+    : '介入后暂停普通交付与验收，奖金继续冻结。依据合同和现有交付记录，通过管理员裁定完成后续处理。'}</p>
+    <form onSubmit={event => { event.preventDefault(); void command.run(`/admin/tasks/${task.id}/${cancel ? 'cancel' : 'intervene'}`, 'POST', { version: task.version, reason: reason.trim() }, onSaved); }}>
+      <label className={styles.field}>管理员处理理由<textarea required rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label>
+      <label className={taskStyles.checkRow}><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />{cancel ? '已核对当前状态，确认关闭任务并全额退款。' : '已核对任务记录，确认介入并保持奖金冻结。'}</label>
+      <div className={styles.formFooter}><span /><button className={styles.secondary} disabled={command.pending || !reason.trim() || !confirmed}>{command.pending ? '正在处理…' : cancel ? '管理员关闭任务并退款' : '管理员介入任务'}</button></div>
+      <CommandNotice command={command} />
+    </form>
+  </section>;
+}
+
 function ResolveForm({ task, onSaved }: { task: TaskDto; onSaved: () => Promise<void> }) {
   const [outcome, setOutcome] = useState<'settled' | 'cancelled'>('cancelled');
   const plan = useSettlement(task);
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const command = useCommand();
-  return <section className={styles.card}><h2>管理员裁定</h2><p className={styles.hint}>仅分配现有冻结奖金，裁定和依据将保留在处理记录中。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/admin/tasks/${task.id}/resolve`, 'POST', { version: task.version, outcome, ...plan.body, reason: reason.trim() }, onSaved); }}><label className={styles.field}>处理结果<select value={outcome} onChange={(event) => { const value = event.target.value as typeof outcome; setOutcome(value); plan.setOutcome(value === 'settled'); setConfirmed(false); }}><option value="cancelled">终止任务，执行付款与退款</option><option value="settled">确认全部交付，结算任务</option></select></label>{outcome === 'cancelled' ? <SettlementFields task={task} plan={plan} resolving /> : <p className={styles.hint}>按当前生效协议全额分账 {points(task.reward_points)} 积分，不退回奖金；执行前须通过 PR 核验。</p>}<label className={styles.field}>裁定依据<textarea rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label><label className={taskStyles.checkRow}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />已核对合同、交付与争议记录，确认执行上述分配。</label><div className={styles.formFooter}><span /><button disabled={command.pending || !reason.trim() || !plan.valid || !confirmed}>{command.pending ? '正在执行…' : '确认裁定并执行'}</button></div><CommandNotice command={command} /></form></section>;
+  return <section className={styles.card}><h2>管理员裁定</h2><p className={styles.hint}>仅分配现有冻结奖金，裁定和依据将保留在处理记录中。</p><form onSubmit={(event) => { event.preventDefault(); void command.run(`/admin/tasks/${task.id}/resolve`, 'POST', { version: task.version, outcome, ...plan.body, reason: reason.trim() }, onSaved); }}><label className={styles.field}>处理结果<select value={outcome} onChange={(event) => { const value = event.target.value as typeof outcome; setOutcome(value); plan.setOutcome(value === 'settled'); setConfirmed(false); }}><option value="cancelled">终止任务，执行付款与退款</option><option value="settled">确认全部交付，结算任务</option></select></label>{outcome === 'cancelled' ? <SettlementFields task={task} plan={plan} resolving /> : <p className={styles.hint}>按当前生效协议全额分账 {points(task.reward_points)} 积分，不退回奖金。{task.repository_id ? '执行前须通过 PR 核验。' : '请根据任务说明核对文字成果。'}</p>}<label className={styles.field}>裁定依据<textarea rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label><label className={taskStyles.checkRow}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />已核对合同、交付与争议记录，确认执行上述分配。</label><div className={styles.formFooter}><span /><button disabled={command.pending || !reason.trim() || !plan.valid || !confirmed}>{command.pending ? '正在执行…' : '确认裁定并执行'}</button></div><CommandNotice command={command} /></form></section>;
 }
 
 function TimelineEvent({ event }: { event: TaskEventDto }) {
-  const labels: Record<string, string> = { agreement_proposed: '提出协作协议', agreement_accepted: '确认协作协议', agreement_activated: '协作协议生效', agreement_rejected: '拒绝协作协议', contribution_submitted: '登记成员成果', created: '保存草稿', updated: '更新合同', published: '发布并冻结奖金', accepted: 'Agent 接单', submitted: '提交 PR 成果', changes_requested: '退回修改', settled: '奖金已结算', cancelled: '任务已取消', cancellation_proposed: '提出取消方案', cancellation_accepted: '接受取消方案', disputed: '标记争议', review_overdue: '验收已超时，等待处理', deadline_disputed: '任务到期，转入争议处理', github_event: '收到 GitHub 状态更新' };
+  const labels: Record<string, string> = { agreement_proposed: '提出协作协议', agreement_accepted: '确认协作协议', agreement_activated: '协作协议生效', agreement_rejected: '拒绝协作协议', contribution_submitted: '登记成员成果', created: '保存草稿', updated: '更新合同', published: '发布并冻结奖金', accepted: 'Agent 接单', submitted: '提交成果', changes_requested: '退回修改', settled: '奖金已结算', cancelled: '任务已取消', cancellation_proposed: '提出取消方案', cancellation_accepted: '接受取消方案', disputed: '标记争议', review_overdue: '验收已超时，等待处理', deadline_disputed: '任务到期，转入争议处理', github_event: '收到 GitHub 状态更新' };
   const kind = event.kind.replace(/^task\./, '');
   const reason = event.details.reason ?? event.details.unmet_criteria;
-  return <li><strong>{labels[kind] ?? kind}</strong><time dateTime={event.created_at}>{dateTime(event.created_at)}</time>{typeof reason === 'string' && <p>{reason}</p>}</li>;
+  return <li><strong>{kind === 'admin_intervened' ? '管理员介入并保持冻结' : labels[kind] ?? kind}</strong><time dateTime={event.created_at}>{dateTime(event.created_at)}</time>{typeof reason === 'string' && <p>{reason}</p>}</li>;
 }

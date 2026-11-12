@@ -47,16 +47,19 @@ export async function requireConversation(tx:Tx,id:string,actor:Actor) {
 export async function conversationBody(tx:Tx,row:Record<string,unknown>) {
   const members=(await tx.query(`SELECT cm.user_id,cm.agent_id,coalesce(a.name,u.display_name) AS name,coalesce(a.owner_user_id,u.id) AS owner_user_id
     FROM conversation_members cm LEFT JOIN agents a ON a.id=cm.agent_id LEFT JOIN users u ON u.id=cm.user_id WHERE cm.conversation_id=$1 ORDER BY cm.id`,[row.id])).rows;
-  return {id:row.id,kind:row.kind,task_id:row.task_id,created_at:row.created_at,members};
+  const lastMessage=row.last_message_id===null?null:(await tx.query<MessageDto>(`${messageSelect} WHERE ${row.last_message_id?'m.id=$1':'m.conversation_id=$1'} ORDER BY m.cursor DESC LIMIT 1`,[row.last_message_id??row.id])).rows[0]??null;
+  return {id:row.id,kind:row.kind,task_id:row.task_id,created_at:row.created_at,members,last_message:lastMessage};
 }
 export const messageSelect=`SELECT m.id,m.cursor::text,m.conversation_id,m.sender_user_id,m.sender_agent_id,coalesce(a.name,u.display_name) AS sender_name,m.body,m.created_at
   FROM messages m JOIN conversations c ON c.id=m.conversation_id LEFT JOIN agents a ON a.id=m.sender_agent_id LEFT JOIN users u ON u.id=m.sender_user_id`;
-export async function messagePage(tx:Tx,actor:Actor,query:{after?:string;limit?:string},conversationId?:string) {
-  const after=query.after??'0',limit=Number(query.limit??30);
-  if(BigInt(after)>9223372036854775807n) throw new AppError('INVALID_REQUEST',400,'无效消息游标');
-  const rows=(await tx.query<MessageDto>(`${messageSelect} WHERE ${conversationAccess} AND m.cursor>$3::bigint AND ($4::uuid IS NULL OR m.conversation_id=$4) ORDER BY m.cursor LIMIT $5`,[...accessParams(actor),after,conversationId??null,limit+1])).rows;
+export async function messagePage(tx:Tx,actor:Actor,query:{after?:string;before?:string;limit?:string},conversationId?:string) {
+  if(query.after!==undefined&&query.before!==undefined) throw new AppError('INVALID_REQUEST',400,'不能同时指定前后消息游标');
+  const backwards=query.before!==undefined,cursor=query.before??query.after??'0',limit=Number(query.limit??30);
+  if(BigInt(cursor)>9223372036854775807n) throw new AppError('INVALID_REQUEST',400,'无效消息游标');
+  const rows=(await tx.query<MessageDto>(`${messageSelect} WHERE ${conversationAccess} AND m.cursor${backwards?'<':'>'}$3::bigint AND ($4::uuid IS NULL OR m.conversation_id=$4) ORDER BY m.cursor ${backwards?'DESC':'ASC'} LIMIT $5`,[...accessParams(actor),cursor,conversationId??null,limit+1])).rows;
   const items=rows.slice(0,limit);
-  return {items,next_cursor:items.at(-1)?.cursor??after,has_more:rows.length>limit,...(conversationId?{conversation_id:conversationId}:{})};
+  if(backwards) items.reverse();
+  return {items,next_cursor:(backwards?items[0]:items.at(-1))?.cursor??cursor,has_more:rows.length>limit,...(conversationId?{conversation_id:conversationId}:{})};
 }
 export async function appendMessage(tx:Tx,actor:Actor,requestId:string,conversation:Record<string,any>,body:string,senderAgentId:string|null) {
   if(conversation.kind==='task') await requireTaskDiscussion(tx,conversation.task_id,actor,senderAgentId);

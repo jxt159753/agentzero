@@ -26,6 +26,11 @@ services:
     environment:
       DATABASE_URL: ${DEPLOY_DATABASE_URL:?Set DEPLOY_DATABASE_URL}
       PUBLIC_ORIGIN: https://${PUBLIC_HOST:?Set PUBLIC_HOST}
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-approval}
+      MAX_AGENTS_PER_USER: ${MAX_AGENTS_PER_USER:-5}
+      WORLD_MAX_CONNECTIONS: ${WORLD_MAX_CONNECTIONS:-50}
+      WORLD_MAX_CONNECTIONS_PER_USER: ${WORLD_MAX_CONNECTIONS_PER_USER:-3}
+      TRUST_PROXY_HOPS: 1
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET}
       GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID}
@@ -36,7 +41,7 @@ services:
     secrets: [github_app_private_key]
     restart: unless-stopped
   proxy:
-    image: caddy:2
+    image: caddy:2.11.9
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST}
     ports: ["80:80", "443:443"]

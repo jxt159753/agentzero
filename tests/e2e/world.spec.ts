@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route, type WebSocketRoute } from '@playwright/test';
 import { WORLD_BOUNDS, WORLD_PUBLIC_AREAS, WORLD_PLACES, type PublicWorldWork, type WorldLand, type WorldSnapshot } from '../../packages/contracts/src/world.js';
-import { WORLD_MODEL_CATALOG, type WorldModelDraft } from '../../packages/contracts/src/world-models.js';
+import { WORLD_MODEL_CATALOG, WORLD_ROOM_DIMENSIONS, type WorldModelDraft } from '../../packages/contracts/src/world-models.js';
 import { WORLD_ASSETS } from '../../apps/web/src/world-assets.js';
 import { generateDefaultLandPlots } from '../../apps/api/src/modules/market/default-land.js';
 
@@ -78,12 +78,12 @@ test('房屋入口可进入独立室内，室内移动保留房间并从出口�
   await page.goto('/world'); const map = page.getByTestId('world-map');
   await page.getByRole('button', { name: 'E · 进入房屋', exact: true }).click();
   await expect(map).toHaveAttribute('data-room-id', roomId);
-  await expect(map).toHaveAttribute('data-self-x', '0'); await expect(map).toHaveAttribute('data-self-y', '0.95');
+  await expect(map).toHaveAttribute('data-self-x', '0'); await expect(map).toHaveAttribute('data-self-y', String(WORLD_ROOM_DIMENSIONS.height / 2 - 0.25));
   await page.screenshot({ path: '.local/room-interior.png', fullPage: true });
   await map.focus(); await page.keyboard.down('s');
-  await expect.poll(async () => Number(await map.getAttribute('data-self-y'))).toBeGreaterThan(1.1);
+  await expect.poll(async () => Number(await map.getAttribute('data-self-y'))).toBeGreaterThan(WORLD_ROOM_DIMENSIONS.height / 2 - 0.1);
   await page.keyboard.up('s');
-  expect(Number(await map.getAttribute('data-self-y'))).toBeLessThanOrEqual(1.12);
+  expect(Number(await map.getAttribute('data-self-y'))).toBeLessThanOrEqual(WORLD_ROOM_DIMENSIONS.height / 2 - 0.08);
   await expect.poll(() => state.moves.some(move => move.room_id === roomId)).toBe(true);
   await page.getByRole('button', { name: 'E · 离开房屋', exact: true }).click();
   await expect(map).toHaveAttribute('data-room-id', '');
@@ -114,6 +114,9 @@ test('布置面板选择房屋室内，保存游戏机后重新进入仍可看�
   await page.getByRole('button', { name: 'E · 进入房屋', exact: true }).click();
   await expect(map).toHaveAttribute('data-room-id', roomId);
   await expect(map).toHaveAttribute('data-model-count', '2');
+  await map.focus(); await page.keyboard.down('w');
+  await expect.poll(async () => Number(await map.getAttribute('data-self-y'))).toBeLessThan(1.2);
+  await page.keyboard.up('w');
   await expect(page.getByRole('region', { name: '附近游戏机', exact: true })).toBeVisible();
   await page.screenshot({ path: '.local/room-arcade.png', fullPage: true });
 });
@@ -719,7 +722,7 @@ test('靠近可联系的 Agent 才显示消息入口，F 解锁鼠标并预选�
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
   await page.keyboard.press('f');
   await expect(page).toHaveURL(`/messages?agent=${otherAgentId}`);
-  await expect(page.getByRole('combobox', { name: '联系 Agent', exact: true })).toHaveValue(otherAgentId);
+  await expect(page.getByRole('button', { name: '联系 代码伙伴', exact: true })).toHaveClass(/selected/);
   expect(await page.evaluate(() => document.pointerLockElement === null)).toBe(true);
   expect(state.writes).toHaveLength(0);
   expect(state.moves).toHaveLength(0);
@@ -770,7 +773,7 @@ test('访客名称在头顶显示，靠近出现私聊入口并支持键盘和�
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
   await page.keyboard.press('f');
   await expect(page).toHaveURL(`/messages?user=${otherUserId}`);
-  await expect(page.getByRole('combobox', { name: '联系访客', exact: true })).toHaveValue(otherUserId);
+  await expect(page.getByRole('button', { name: '联系 新邻居', exact: true })).toHaveClass(/selected/);
   expect(await page.evaluate(() => document.pointerLockElement === null)).toBe(true);
   await page.getByRole('button', { name: '关闭功能面板', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });

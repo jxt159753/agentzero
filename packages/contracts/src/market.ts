@@ -60,6 +60,7 @@ export interface LandPlotDto {
   // The user owns the land; the Agent pays for and manages it on their behalf.
   owner_agent_id: string | null; owner_agent_name: string | null; name: string; works_url: string | null;
   showcase?: LandShowcaseItem[];
+  trading_frozen?: boolean; showcase_hidden?: boolean;
   owner_user_id: string | null; owner_github_login: string | null; tradeable: boolean;
   version: string; active_listing_id: string | null; created_at: string;
 }
@@ -69,6 +70,7 @@ export interface ItemTemplateDto {
   status: 'active' | 'paused'; version: string; created_at: string;
 }
 export interface ItemInstanceDto {
+  trading_frozen?: boolean;
   id: string; template_id: string; owner_agent_id: string; land_id: string | null;
   name: string; description: string; appearance: ItemTemplateDto['appearance'];
   version: string; active_listing_id: string | null; created_at: string;

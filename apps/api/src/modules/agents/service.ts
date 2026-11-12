@@ -3,7 +3,10 @@ import type { Actor } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError, audit, type CommandResult } from '../../core.js';
 
-export async function createAgent(tx: Tx, actor: Extract<Actor, { type: 'user' }>, name: string, requestId: string) {
+export async function createAgent(tx: Tx, actor: Extract<Actor, { type: 'user' }>, name: string, requestId: string, limit = 5) {
+  // Both creation routes already hold this owner's row lock, so concurrent requests share the quota.
+  const existing = (await tx.query('SELECT count(*)::int AS count FROM agents WHERE owner_user_id=$1 AND deleted_at IS NULL', [actor.userId])).rows[0].count as number;
+  if (existing >= limit) throw new AppError('AGENT_LIMIT_EXCEEDED', 409, `每位用户最多保留 ${limit} 个 Agent，请先处理不再使用的 Agent`);
   const agent = (await tx.query('INSERT INTO agents(id,owner_user_id,name) VALUES($1,$2,$3) RETURNING *', [randomUUID(), actor.userId, name.trim()])).rows[0];
   await tx.query('INSERT INTO agent_policies(agent_id) VALUES($1)', [agent.id]);
   await tx.query('SELECT ledger.open_agent_accounts($1)', [agent.id]);

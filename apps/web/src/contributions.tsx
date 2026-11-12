@@ -25,16 +25,17 @@ export function ContributionsPage() {
   const contributions = useQuery({ queryKey: ['contributions', cursor.cursor], queryFn: () => api<ContributionRewardsPageDto>(`/contributions${queryString({ cursor: cursor.cursor })}`) });
   const refresh = useRefreshContributions();
   const data = contributions.data;
+  const rewardsEnabled = data && kinds.some(({ field }) => data.settings[field] !== '0');
   return <>
-    <div className={styles.pageHeading}><div><div className={styles.eyebrow}>GITHUB CONTRIBUTIONS</div><h1>GitHub 贡献</h1><p>提交 Commit、Pull Request 或 Issue，获得对应的积分奖励。</p></div><button className={styles.secondary} onClick={() => void refresh()}>刷新贡献</button></div>
+    <div className={styles.pageHeading}><div><div className={styles.eyebrow}>GITHUB CONTRIBUTIONS</div><h1>GitHub 贡献</h1><p>查看贡献奖励规则、收款设置与历史到账记录。</p></div><button className={styles.secondary} onClick={() => void refresh()}>刷新贡献</button></div>
     <ErrorNotice error={contributions.error} />
     {contributions.isPending ? <Loading /> : data && <>
       <div className={styles.walletGrid}>{kinds.map(({ kind, label, field }) => <div className={styles.balanceCard} key={kind}><span>{label}</span><strong>{points(data.settings[field])}<small> 积分 / 个</small></strong><small>{data.settings[field] === '0' ? '暂未开启' : '每个对象奖励一次'}</small></div>)}</div>
-      <p className={styles.hint}>仓库准入后会自动补算现存各分支的历史 Commit，以及所有状态的 PR、Issue。奖励归贡献作者，PR 无需合并；历史补算、实时到账和链接补领共用一次奖励。</p>
-      <div className={styles.detailGrid}><PreferenceForm key={data.preference.version} preference={data.preference} /><ClaimForm settings={data.settings} /></div>
+      {rewardsEnabled ? <><p className={styles.hint}>仓库准入后会自动补算现存各分支的历史 Commit，以及所有状态的 PR、Issue。奖励归贡献作者，PR 无需合并；历史补算、实时到账和链接补领共用一次奖励。</p>
+      <div className={styles.detailGrid}><PreferenceForm key={data.preference.version} preference={data.preference} /><ClaimForm settings={data.settings} /></div></> : <section className={styles.card}><h2>通过任务获得积分</h2><p>自动贡献奖励暂未开放。你可以在任务大厅领取有预算的任务，按约定完成并通过验收后获取积分。</p><Link className={styles.primaryLink} to="/tasks">前往任务大厅</Link></section>}
       <RepositoryRequestsPanel />
       <section className={styles.card} aria-label="积分到账记录"><div className={styles.sectionHeading}><h2>积分到账记录</h2><span className={styles.hint}>按到账时间排序</span></div>
-        {data.items.length ? <div className={styles.tableScroll}><table><thead><tr><th>贡献</th><th>积分</th><th>收款 Agent</th><th>到账时间</th></tr></thead><tbody>{data.items.map(record => <tr key={record.id}><td><a href={record.url} target="_blank" rel="noreferrer">{record.title || record.object_id}</a><small>{kinds.find(item => item.kind === record.kind)?.label} · {record.kind === 'commit' ? record.object_id.slice(0, 12) : `#${record.object_id}`}</small></td><td className={styles.numeric}>+{points(record.points)}</td><td><Link to={`/agents/${record.agent_id}`}>查看收款钱包</Link><small className={taskStyles.sha}>{record.agent_id}</small></td><td>{dateTime(record.created_at)}</td></tr>)}</tbody></table></div> : <Empty>还没有积分到账记录。设置自动收款后，获准仓库的历史贡献会在后台陆续补算，也可通过链接补领。</Empty>}
+        {data.items.length ? <div className={styles.tableScroll}><table><thead><tr><th>贡献</th><th>积分</th><th>收款 Agent</th><th>到账时间</th></tr></thead><tbody>{data.items.map(record => <tr key={record.id}><td><a href={record.url} target="_blank" rel="noreferrer">{record.title || record.object_id}</a><small>{kinds.find(item => item.kind === record.kind)?.label} · {record.kind === 'commit' ? record.object_id.slice(0, 12) : `#${record.object_id}`}</small></td><td className={styles.numeric}>+{points(record.points)}</td><td><Link to={`/agents/${record.agent_id}`}>查看收款钱包</Link><small className={taskStyles.sha}>{record.agent_id}</small></td><td>{dateTime(record.created_at)}</td></tr>)}</tbody></table></div> : <Empty>{rewardsEnabled ? '还没有积分到账记录。设置自动收款后，获准仓库的历史贡献会在后台陆续补算，也可通过链接补领。' : '还没有历史贡献奖励记录。'}</Empty>}
         <Pagination {...cursor} nextCursor={data.next_cursor} />
       </section>
     </>}

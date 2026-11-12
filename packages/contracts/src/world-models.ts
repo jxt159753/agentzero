@@ -31,7 +31,7 @@ export type WorldModelCategory = typeof WORLD_MODEL_CATALOG[WorldModelId]['categ
 export const WORLD_MODEL_LIMIT = 32;
 export const WORLD_MODEL_MIN_SCALE = 0.25;
 export const WORLD_MODEL_MAX_SCALE = 2;
-export const WORLD_ROOM_DIMENSIONS = { width: 3, height: 2.4 } as const;
+export const WORLD_ROOM_DIMENSIONS = { width: 4.8, height: 3.6 } as const;
 export const isWorldRoom = (modelId: WorldModelId): boolean => WORLD_MODEL_CATALOG[modelId]?.category === 'building';
 
 const ModelId = Type.Union((Object.keys(WORLD_MODEL_CATALOG) as WorldModelId[]).map(id => Type.Literal(id)));
@@ -66,5 +66,5 @@ export function worldModelFits(land: Pick<WorldLandGeometry, 'area' | 'width' | 
 }
 
 export function worldRoomFits(model: WorldModelDraft): boolean {
-  return !isWorldRoom(model.model_id) && worldModelFits({ area: 720, ...WORLD_ROOM_DIMENSIONS }, model);
+  return !isWorldRoom(model.model_id) && worldModelFits({ area: 1728, ...WORLD_ROOM_DIMENSIONS }, model);
 }

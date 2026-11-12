@@ -42,6 +42,7 @@ function AgentSelect({ value, onChange, agents, personal = false }: { value: str
   return <label className={common.field}>积分账户<select aria-label="游戏积分账户" required={!personal} value={value} onChange={event => onChange(event.target.value)}><option value="">{personal ? '我的钱包' : '选择自己的 Agent 钱包'}</option>{agents.map(agent => <option value={agent.id} key={agent.id}>{agent.name}</option>)}</select></label>;
 }
 function gameAvailability(game: GameDto) {
+  if (game.moderation_blocked) return '管理员已下架';
   return game.status === 'paused' ? '发布者已暂停' : game.accepting_players ? '营业中' : '奖池不足 · 暂停接待';
 }
 
@@ -86,6 +87,7 @@ function GameFrame({ game, session, onSubmitted, compact = false }: { game: Game
     return () => window.removeEventListener('message', receive);
     // The frame is keyed by game/session, and the mutable session is read through its ref.
   }, [game.id, session?.id]);
+  if (game.moderation_blocked) return <p role="status">游戏已被管理员下架，内容暂停展示。已有对局仍按本局规则结算或超时退款。</p>;
   return <><iframe ref={frame} className={compact ? styles.preview : styles.screen} title={`${game.name} · ${session ? '游戏' : '预览'}`} src={game.entry_url} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={init} /><ErrorNotice error={error} />{retry && <button type="button" onClick={() => void submitRef.current()}>重试本局分数提交</button>}</>;
 }
 

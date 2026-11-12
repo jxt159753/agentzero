@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { withTransaction, type Tx } from '@agentzero/database';
 import {
   AcceptTask,CancelTaskProposal,ConfirmAgreement,CreateTask,EditTask,IdParams,PageQuery,ResolveTask,ReviewTask,SubmitTask,TaskReasonBody,TaskStatus,TaskVersionBody,Uuid,
-  type Actor,type CancelTaskInput,type ConfirmationDto,type ConfirmAgreementInput,type CreateTaskInput,type EditTaskInput,type ResolveTaskInput,type ReviewTaskInput,
+  type Actor,type CancelTaskInput,type ConfirmationDto,type ConfirmAgreementInput,type CreateTaskInput,type EditTaskInput,type ResolveTaskInput,type ReviewTaskInput,type SubmitTaskInput,
 } from '@agentzero/contracts';
 import { AppError,decodeCursor,lockActor,paginated,type CommandOptions } from '../../core.js';
 import { command,replayCommand,type ApiContext } from '../../http.js';
@@ -13,7 +13,7 @@ import { assertRepositoryAvailable } from '../github/service.js';
 import type { GitHubRepositoryProvider,PullRequestEvidence } from '../github/provider.js';
 import { activeParticipants,confirmationRows,confirmationSubject,participantAgent,participantOwnerIds,settlementPayments } from '../collaboration/service.js';
 import {
-  finishTask,isAdmin,isFinal,isParticipant,isPublisher,loadTask,requireAssignee,requireBeforeDeadline,requirePublisher,requireReviewer,
+  finishTask,isAdmin,isFinal,isParticipant,isPublisher,loadTask,markTaskDisputed,requireAssignee,requireBeforeDeadline,requirePublisher,requireReviewer,
   requireState,requireVersion,taskBody,taskDetail,taskEvent,taskResult,taskSelect,userId,validateFields,validateReviewer,verifyEvidence,type TaskRow,
 } from './service.js';
 
@@ -32,7 +32,7 @@ async function current(tx:Tx,request:TaskRequest,version:string) {
   return task;
 }
 async function fetchEvidence(provider:GitHubRepositoryProvider,task:TaskRow,number:number) {
-  return provider.getPullRequest({installationId:task.installation_id,repositoryId:task.github_repository_id,owner:task.repository_owner,name:task.repository_slug,number});
+  return provider.getPullRequest({installationId:task.installation_id!,repositoryId:task.github_repository_id!,owner:task.repository_owner!,name:task.repository_slug!,number});
 }
 async function latestDelivery(tx:Tx,task:TaskRow) {
   const delivery=(await tx.query('SELECT * FROM task_deliveries WHERE id=$1 AND task_id=$2',[task.latest_delivery_id,task.id])).rows[0];
@@ -40,7 +40,7 @@ async function latestDelivery(tx:Tx,task:TaskRow) {
   return delivery;
 }
 async function assertSnapshotRepository(tx:Tx,task:TaskRow,prior:TaskRow) {
-  await assertRepositoryAvailable(tx,task.repository_id);
+  await assertRepositoryAvailable(tx,task.repository_id!);
   if(task.repository_id!==prior.repository_id||task.github_repository_id!==prior.github_repository_id||task.installation_id!==prior.installation_id||task.repository_owner!==prior.repository_owner||task.repository_slug!==prior.repository_slug) throw new AppError('TASK_VERSION_CONFLICT',409,'仓库配置已变化，请重试');
 }
 async function recordReview(tx:Tx,task:TaskRow,actor:Actor,decision:string,reason:string,unmet:string|null,evidence?:PullRequestEvidence) {
@@ -48,6 +48,17 @@ async function recordReview(tx:Tx,task:TaskRow,actor:Actor,decision:string,reaso
 }
 
 export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:GitHubRepositoryProvider) {
+  app.get<{Querystring:{cursor?:string;limit?:string;status?:string;disputed?:string}}>('/api/v1/admin/tasks',{
+    schema:{querystring:Type.Intersect([PageQuery,Type.Object({status:Type.Optional(TaskStatus),disputed:Type.Optional(Type.Literal('true'))})])},
+  },async request=>withTransaction(ctx.pool,async tx=>{
+    await lockActor(tx,request.actor,{admin:true});
+    const q=request.query,cursor=decodeCursor(q.cursor),limit=Number(q.limit??30);
+    const rows=(await tx.query<TaskRow>(`${taskSelect} WHERE ($1::text IS NULL OR t.status=$1)
+      AND (NOT $2 OR t.disputed) AND ($3::timestamptz IS NULL OR (t.created_at,t.id)<($3,$4::uuid))
+      ORDER BY t.created_at DESC,t.id DESC LIMIT $5`,[q.status??null,q.disputed==='true',cursor?.[0]??null,cursor?.[1]??null,limit+1])).rows;
+    const page=paginated(rows,limit);
+    return {...page,items:page.items.map(task=>taskBody(task))};
+  }));
   app.get('/api/v1/task-reviewers',async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor);
     return {items:(await tx.query("SELECT id,display_name,github_login FROM users WHERE status='active' ORDER BY display_name,id")).rows};
@@ -69,11 +80,12 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     return taskDetail(tx,await loadTask(tx,request.params.id,request.actor,true),request.actor);
   }));
   app.post<{Body:CreateTaskInput}>('/api/v1/tasks',{schema:{body:CreateTask}},async(request,reply)=>{
-    const b=request.body;
-    if(request.actor.type==='agent'&&b.payer_agent_id!==request.actor.agentId) throw new AppError('ACCESS_DENIED',403);
-    return command(ctx,request,reply,{...(b.payer_agent_id?{agentId:b.payer_agent_id}:{admin:true}),userIds:[b.reviewer_user_id]},async tx=>{
-      validateFields(b);
-      await assertRepositoryAvailable(tx,b.repository_id);await validateReviewer(tx,b.reviewer_user_id);
+    const input=request.body;
+    if(request.actor.type==='agent'&&input.payer_agent_id!==request.actor.agentId) throw new AppError('ACCESS_DENIED',403);
+    return command(ctx,request,reply,{...(input.payer_agent_id?{agentId:input.payer_agent_id}:{admin:true}),userIds:[input.reviewer_user_id??userId(request.actor)!]},async tx=>{
+      const b=validateFields(input,userId(request.actor)!);
+      if(b.repository_id) await assertRepositoryAvailable(tx,b.repository_id);
+      await validateReviewer(tx,b.reviewer_user_id);
       const id=randomUUID();
       await tx.query(`INSERT INTO tasks(id,title,description,repository_id,issue_number,acceptance_criteria,required_checks,reward_points,deadline_at,publisher_user_id,publisher_agent_id,payer_agent_id,reviewer_user_id)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[id,b.title.trim(),b.description.trim(),b.repository_id,b.issue_number??null,b.acceptance_criteria.trim(),JSON.stringify(b.required_checks.map(n=>n.trim())),b.reward_points,b.deadline_at,userId(request.actor),request.actor.type==='agent'?request.actor.agentId:b.payer_agent_id,b.payer_agent_id,b.reviewer_user_id]);
@@ -94,10 +106,13 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     return command(ctx,request,reply,options,async tx=>{
       const task=await current(tx,request,b.version);requirePublisher(task,request.actor);requireState(task,['draft','open']);
       if(task.status==='open'&&(b.payer_agent_id!==undefined&&b.payer_agent_id!==task.payer_agent_id||b.repository_id!==undefined&&b.repository_id!==task.repository_id)) throw new AppError('TASK_STATE_CONFLICT',409,'已发布任务不能更换资金来源或仓库');
-      const fields:CreateTaskInput={title:b.title??task.title,description:b.description??task.description,repository_id:b.repository_id??task.repository_id,
-        issue_number:b.issue_number===undefined?task.issue_number:b.issue_number,acceptance_criteria:b.acceptance_criteria??task.acceptance_criteria,
-        required_checks:b.required_checks??task.required_checks,reward_points:b.reward_points??task.reward_points,deadline_at:b.deadline_at??new Date(task.deadline_at).toISOString(),reviewer_user_id:b.reviewer_user_id??task.reviewer_user_id,payer_agent_id:payer};
-      validateFields(fields);await assertRepositoryAvailable(tx,fields.repository_id);await validateReviewer(tx,fields.reviewer_user_id);
+      const textMode=b.repository_id===null;
+      const fields=validateFields({title:b.title??task.title,description:b.description??task.description,repository_id:b.repository_id===undefined?task.repository_id:b.repository_id,
+        issue_number:b.issue_number===undefined?(textMode?null:task.issue_number):b.issue_number,acceptance_criteria:b.acceptance_criteria??task.acceptance_criteria,
+        required_checks:b.required_checks??(textMode?[]:task.required_checks),reward_points:b.reward_points??task.reward_points,deadline_at:b.deadline_at??new Date(task.deadline_at).toISOString(),
+        reviewer_user_id:b.reviewer_user_id??(textMode?task.publisher_user_id:task.reviewer_user_id),payer_agent_id:payer},task.publisher_user_id);
+      if(fields.repository_id) await assertRepositoryAvailable(tx,fields.repository_id);
+      await validateReviewer(tx,fields.reviewer_user_id);
       if(task.hold_id&&fields.reward_points!==task.reward_points) await adjustHold(tx,{actor:request.actor,requestId:request.id},{holdId:task.hold_id,amount:fields.reward_points,revision:`task:${task.id}:${task.version}`,permission:'can_accept_task',reason:'发布者调整任务奖金'});
       await tx.query(`UPDATE tasks SET title=$2,description=$3,repository_id=$4,issue_number=$5,acceptance_criteria=$6,required_checks=$7,reward_points=$8,deadline_at=$9,reviewer_user_id=$10,payer_agent_id=$11,publisher_agent_id=$12,version=version+1,updated_at=clock_timestamp() WHERE id=$1`,
         [task.id,fields.title.trim(),fields.description.trim(),fields.repository_id,fields.issue_number??null,fields.acceptance_criteria.trim(),JSON.stringify(fields.required_checks.map(n=>n.trim())),fields.reward_points,fields.deadline_at,fields.reviewer_user_id,payer,request.actor.type==='agent'?request.actor.agentId:payer]);
@@ -119,7 +134,8 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     const prior=await snapshot(ctx,request);
     return command(ctx,request,reply,actorOptions(prior,request.actor,'publisher',false),async tx=>{
       const task=await current(tx,request,request.body.version);requirePublisher(task,request.actor);requireState(task,['draft']);requireBeforeDeadline(task);
-      await assertRepositoryAvailable(tx,task.repository_id);await validateReviewer(tx,task.reviewer_user_id);
+      if(task.repository_id) await assertRepositoryAvailable(tx,task.repository_id);
+      await validateReviewer(tx,task.reviewer_user_id);
       const hold=await reserve(tx,{actor:request.actor,requestId:request.id},{businessRef:`task:${task.id}`,payerAgentId:task.payer_agent_id,amount:task.reward_points,permission:'can_accept_task',reason:`发布任务：${task.title}`});
       await tx.query("UPDATE tasks SET status='open',hold_id=$2,version=version+1,published_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1",[task.id,hold.holdId]);
       await taskEvent(tx,task,request.actor,request.id,'published',{hold_id:hold.holdId,reward_points:task.reward_points});
@@ -130,7 +146,8 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     const prior=await snapshot(ctx,request),b=request.body;
     return command(ctx,request,reply,{agentId:b.agent_id,userIds:[prior.reviewer_user_id,prior.publisher_user_id]},async tx=>{
       const task=await current(tx,request,b.version);requireState(task,['open']);requireBeforeDeadline(task);
-      await assertRepositoryAvailable(tx,task.repository_id);await validateReviewer(tx,task.reviewer_user_id,userId(request.actor));
+      if(task.repository_id) await assertRepositoryAvailable(tx,task.repository_id);
+      await validateReviewer(tx,task.reviewer_user_id,userId(request.actor));
       if(task.payer_agent_id===b.agent_id) throw new AppError('ACCESS_DENIED',403,'付款 Agent 不能承接自己的任务');
       const policy=(await tx.query('SELECT can_accept_task FROM agent_policies WHERE agent_id=$1 FOR UPDATE',[b.agent_id])).rows[0];
       if(!policy?.can_accept_task) throw new AppError('ACCESS_DENIED',403,'请先开启 Agent 接单权限');
@@ -140,20 +157,25 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
       return taskResult(updated);
     });
   });
-  app.post<{Params:{id:string};Body:{version:string;pr_number:number;head_sha:string}}>('/api/v1/tasks/:id/deliveries',{schema:{params:IdParams,body:SubmitTask}},async(request,reply)=>{
+  app.post<{Params:{id:string};Body:SubmitTaskInput}>('/api/v1/tasks/:id/deliveries',{schema:{params:IdParams,body:SubmitTask}},async(request,reply)=>{
     if(await replayCommand(ctx,request,reply,{allowPaused:true})) return reply;
     const prior=await snapshot(ctx,request),b=request.body;
     requireAssignee(prior,request.actor);requireVersion(prior,b.version);requireState(prior,['in_progress','changes_requested']);requireBeforeDeadline(prior);
-    await withTransaction(ctx.pool,tx=>assertRepositoryAvailable(tx,prior.repository_id));
-    const evidence=await fetchEvidence(provider,prior,b.pr_number);
+    const pr='pr_number' in b?b:undefined,content='content' in b?b.content.trim():null;
+    if(!!prior.repository_id!==!!pr) throw new AppError('INVALID_REQUEST',400,prior.repository_id?'GitHub 任务必须提交 PR 编号与完整提交 SHA':'纯文字任务必须提交文字成果');
+    let evidence:PullRequestEvidence|undefined;
+    if(pr) {
+      await withTransaction(ctx.pool,tx=>assertRepositoryAvailable(tx,prior.repository_id!));
+      evidence=await fetchEvidence(provider,prior,pr.pr_number);
+    }
     return command(ctx,request,reply,actorOptions(prior,request.actor,'assignee'),async tx=>{
       const task=await current(tx,request,b.version);requireAssignee(task,request.actor);requireState(task,['in_progress','changes_requested']);requireBeforeDeadline(task);
-      await assertSnapshotRepository(tx,task,prior);verifyEvidence(task,evidence,b.pr_number,b.head_sha);
+      if(pr) {await assertSnapshotRepository(tx,task,prior);verifyEvidence(task,evidence!,pr.pr_number,pr.head_sha);}
       const id=randomUUID();
-      await tx.query('INSERT INTO task_deliveries(id,task_id,agent_id,pr_number,head_sha,pr_url,evidence) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,task.id,task.assignee_agent_id,b.pr_number,b.head_sha,evidence.url,JSON.stringify(evidence)]);
+      await tx.query('INSERT INTO task_deliveries(id,task_id,agent_id,pr_number,head_sha,pr_url,content,evidence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,task.id,task.assignee_agent_id,pr?.pr_number??null,pr?.head_sha??null,evidence?.url??null,content,JSON.stringify(evidence??{})]);
       await tx.query("UPDATE task_cancellation_proposals SET status='superseded' WHERE task_id=$1 AND status='pending'",[task.id]);
       await tx.query("UPDATE tasks SET status='submitted',latest_delivery_id=$2,version=version+1,review_due_at=clock_timestamp()+interval '72 hours',review_reminded_at=NULL,updated_at=clock_timestamp() WHERE id=$1",[task.id,id]);
-      await taskEvent(tx,task,request.actor,request.id,'submitted',{delivery_id:id,pr_number:b.pr_number,head_sha:b.head_sha});
+      await taskEvent(tx,task,request.actor,request.id,'submitted',{delivery_id:id,...(pr?{pr_number:pr.pr_number,head_sha:pr.head_sha}:{})});
       return taskResult(await loadTask(tx,task.id,request.actor),201);
     });
   });
@@ -165,8 +187,10 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     if(prior.status!=='settled') {
       requireVersion(prior,b.version);requireState(prior,['submitted']);
       if(b.decision==='accept') {
-        const delivery=await withTransaction(ctx.pool,async tx=>{await assertRepositoryAvailable(tx,prior.repository_id);return latestDelivery(tx,prior);});
-        evidence=await fetchEvidence(provider,prior,delivery.pr_number);
+        if(prior.repository_id) {
+          const delivery=await withTransaction(ctx.pool,async tx=>{await assertRepositoryAvailable(tx,prior.repository_id!);return latestDelivery(tx,prior);});
+          evidence=await fetchEvidence(provider,prior,delivery.pr_number);
+        }
       } else if(!b.unmet_criteria?.trim()) throw new AppError('INVALID_REQUEST',400,'退回修改必须引用未满足的验收条件');
     }
     return command(ctx,request,reply,actorOptions(prior,request.actor,'reviewer'),async tx=>{
@@ -175,7 +199,7 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
       requireVersion(task,b.version);requireState(task,['submitted']);
       const delivery=await latestDelivery(tx,task);
       if(b.decision==='accept') {
-        await assertSnapshotRepository(tx,task,prior);verifyEvidence(task,evidence!,delivery.pr_number,delivery.head_sha,true);
+        if(task.repository_id) {await assertSnapshotRepository(tx,task,prior);verifyEvidence(task,evidence!,delivery.pr_number,delivery.head_sha,true);}
         await finishTask(tx,task,request.actor,request.id,{payment:task.reward_points,refund:'0',reason:b.reason,outcome:'settled',evidence});
       } else {
         if(!b.unmet_criteria?.trim()) throw new AppError('INVALID_REQUEST',400,'退回修改必须引用未满足的验收条件');
@@ -246,14 +270,28 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     return command(ctx,request,reply,actorOptions(prior,request.actor,'participant'),async tx=>{
       const task=await current(tx,request,request.body.version);requireState(task,['in_progress','submitted','changes_requested'],true);
       if(!isParticipant(task,request.actor)) throw new AppError('ACCESS_DENIED',403);
-      if(!task.disputed) {
-        await tx.query("UPDATE task_cancellation_proposals SET status='superseded' WHERE task_id=$1 AND status='pending'",[task.id]);
-        await tx.query('UPDATE tasks SET disputed=true,dispute_reason=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[task.id,request.body.reason]);
-        await taskEvent(tx,task,request.actor,request.id,'disputed',{reason:request.body.reason});
-      }
+      if(!task.disputed) await markTaskDisputed(tx,task,request.actor,request.id,request.body.reason);
       return taskResult(await loadTask(tx,task.id,request.actor));
     });
   });
+  for(const action of ['cancel','intervene'] as const) {
+    app.post<{Params:{id:string};Body:{version:string;reason:string}}>(`/api/v1/admin/tasks/:id/${action}`,{schema:{params:IdParams,body:TaskReasonBody}},async(request,reply)=>{
+      if(await replayCommand(ctx,request,reply,{admin:true})) return reply;
+      const prior=await snapshot(ctx,request);
+      return command(ctx,request,reply,{...actorOptions(prior,request.actor,'reviewer'),admin:true},async tx=>{
+        const task=await current(tx,request,request.body.version);
+        if(participantOwnerIds(task).includes(userId(request.actor)!)) throw new AppError('REVIEWER_CONFLICT',409,'管理员不能处理自己 Agent 参与的任务');
+        if(action==='cancel') {
+          requireState(task,['open']);
+          await finishTask(tx,task,request.actor,request.id,{payment:'0',refund:task.reward_points,reason:request.body.reason,outcome:'cancelled'});
+        } else {
+          requireState(task,['in_progress','submitted','changes_requested']);
+          await markTaskDisputed(tx,task,request.actor,request.id,request.body.reason,'admin_intervened');
+        }
+        return taskResult(await loadTask(tx,task.id,request.actor));
+      });
+    });
+  }
   app.post<{Params:{id:string};Body:ResolveTaskInput}>('/api/v1/admin/tasks/:id/resolve',{schema:{params:IdParams,body:ResolveTask}},async(request,reply)=>{
     if(await replayCommand(ctx,request,reply,{admin:true})) return reply;
     await withTransaction(ctx.pool,tx=>lockActor(tx,request.actor,{admin:true}));
@@ -262,8 +300,8 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
     if(!isFinal(prior)) {
       requireVersion(prior,b.version);
       if(!prior.disputed) throw new AppError('TASK_STATE_CONFLICT',409,'任务没有未处理争议');
-      if(b.outcome==='settled') {
-        const delivery=await withTransaction(ctx.pool,async tx=>{await assertRepositoryAvailable(tx,prior.repository_id);return latestDelivery(tx,prior);});
+      if(b.outcome==='settled'&&prior.repository_id) {
+        const delivery=await withTransaction(ctx.pool,async tx=>{await assertRepositoryAvailable(tx,prior.repository_id!);return latestDelivery(tx,prior);});
         evidence=await fetchEvidence(provider,prior,delivery.pr_number);
       }
     }
@@ -274,8 +312,8 @@ export async function registerTasks(app:FastifyInstance,ctx:ApiContext,provider:
       requireVersion(task,b.version);
       if(!task.disputed) throw new AppError('TASK_STATE_CONFLICT',409,'任务没有未处理争议');
       if(b.outcome==='settled') {
-        await assertSnapshotRepository(tx,task,prior);const delivery=await latestDelivery(tx,task);
-        verifyEvidence(task,evidence!,delivery.pr_number,delivery.head_sha,true);
+        const delivery=await latestDelivery(tx,task);
+        if(task.repository_id) {await assertSnapshotRepository(tx,task,prior);verifyEvidence(task,evidence!,delivery.pr_number,delivery.head_sha,true);}
       }
       await finishTask(tx,task,request.actor,request.id,{payment:b.payment_points,payments:b.payments,refund:b.refund_points,reason:b.reason,outcome:b.outcome,evidence});
       await recordReview(tx,task,request.actor,`resolve_${b.outcome}`,b.reason,null,evidence);

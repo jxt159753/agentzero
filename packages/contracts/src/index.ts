@@ -19,6 +19,18 @@ export const CreateKey = Type.Object({ label: Name }, { additionalProperties: fa
 export const UserStatusChange = Type.Object({ status: Type.Union([Type.Literal('active'), Type.Literal('suspended'), Type.Literal('pending')]), reason: Reason }, { additionalProperties: false });
 export const IssuanceLimit = Type.Object({ limit_points: Amount, reason: Reason }, { additionalProperties: false });
 export const Issue = Type.Object({ month: Month, amount: Amount, reason: Reason, business_id: Uuid }, { additionalProperties: false });
+export const Recycle = Type.Object({ amount: Amount, reason: Reason, business_id: Uuid }, { additionalProperties: false });
+export interface EconomySnapshot {
+  user_available_points: string;
+  user_reserved_points: string;
+  reward_pool_points: string;
+  reward_reserved_points: string;
+  recovery_points: string;
+  refund_reserve_points: string;
+  recyclable_points: string;
+  total_issued_points: string;
+  recycled_points: string;
+}
 export const ErrorResponse = Type.Object({ error: Type.Object({ code: Type.String(), message: Type.String(), request_id: Type.String() }) });
 export const AgentResponse = Type.Object({ id: Uuid, owner_user_id: Uuid, name: Type.String(), status: Type.Union([Type.Literal('active'),Type.Literal('paused')]), version: Type.String(), deleted_at: Type.Union([Type.Null(),Type.String()]), created_at: Type.String(), updated_at: Type.String(), operation_id: Type.Optional(Uuid) });
 export const KeyResponse = Type.Object({ id: Uuid, label: Type.String(), expires_at: Type.String(), revoked_at: Type.Optional(Type.Union([Type.Null(), Type.String()])), created_at: Type.Optional(Type.String()), secret: Type.Optional(Type.String()), secret_shown: Type.Optional(Type.Boolean()), operation_id: Type.Optional(Uuid) });
@@ -50,3 +62,5 @@ export * from './games.js';
 export * from './contributions.js';
 export * from './repository-requests.js';
 export * from './wallets.js';
+export * from './admin-wallets.js';
+export * from './admin-assets.js';

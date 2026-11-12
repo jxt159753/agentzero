@@ -194,6 +194,61 @@ describe('phase 3 private conversations and cursor polling',()=>{
     expect((await get(b,'/api/v1/messages?after=9999999999999999999')).statusCode).toBe(400);
   });
 
+  it('opens the latest messages and pages backwards in display order while keeping forward polling compatible',async()=>{
+    const conversation=await direct(a,b),unrelated=await direct(outsider,b);
+    for(const body of ['one','two','three','four','five']) expect((await post(a,`/api/v1/conversations/${conversation.id}/messages`,{body})).statusCode).toBe(201);
+    await post(outsider,`/api/v1/conversations/${unrelated.id}/messages`,{body:'unrelated'});
+    const path=`/api/v1/conversations/${conversation.id}/messages`;
+    const latest=(await get(alice,`${path}?before=9223372036854775807&limit=2`)).json();
+    expect(latest.items.map((message:{body:string})=>message.body)).toEqual(['four','five']);
+    expect(latest.has_more).toBe(true);expect(latest.next_cursor).toBe(latest.items[0].cursor);
+    const earlier=(await get(alice,`${path}?before=${latest.next_cursor}&limit=2`)).json();
+    expect(earlier.items.map((message:{body:string})=>message.body)).toEqual(['two','three']);
+    expect(earlier.has_more).toBe(true);expect(earlier.next_cursor).toBe(earlier.items[0].cursor);
+    const first=(await get(alice,`${path}?before=${earlier.next_cursor}&limit=2`)).json();
+    expect(first.items.map((message:{body:string})=>message.body)).toEqual(['one']);expect(first.has_more).toBe(false);
+    const empty=(await get(alice,`${path}?before=${first.next_cursor}`)).json();
+    expect(empty).toMatchObject({items:[],next_cursor:first.next_cursor,has_more:false});
+    expect((await get(alice,`${path}?before=0`)).json()).toMatchObject({items:[],next_cursor:'0',has_more:false});
+    expect((await get(alice,`${path}?before=9999999999999999999`)).statusCode).toBe(400);
+    expect((await get(alice,`${path}?before=3&after=0`)).statusCode).toBe(400);
+    await post(a,path,{body:'six'});
+    const polled=(await get(alice,`${path}?after=${latest.items.at(-1).cursor}`)).json();
+    expect(polled.items.map((message:{body:string})=>message.body)).toEqual(['six']);
+    expect((await get(a,'/api/v1/messages?before=9223372036854775807&limit=2')).json().items.map((message:{body:string})=>message.body)).toEqual(['five','six']);
+    expect((await get(outsider,`${path}?before=9223372036854775807`)).statusCode).toBe(403);
+    const taskId=await taskFixture(),taskPath=`/api/v1/tasks/${taskId}/messages`;
+    expect((await get(alice,`${taskPath}?before=8`)).json()).toMatchObject({items:[],next_cursor:'8',has_more:false});
+    expect((await get(alice,`${taskPath}?before=8&after=0`)).statusCode).toBe(400);
+    expect((await get(alice,`${taskPath}?before=9999999999999999999`)).statusCode).toBe(400);
+    await post(alice,taskPath,{body:'task discussion'});
+    expect((await get(alice,`${taskPath}?before=9223372036854775807`)).json().items.map((message:{body:string})=>message.body)).toEqual(['task discussion']);
+  });
+
+  it('lists conversations by their last message with exact activity cursors and preserves creation timestamps',async()=>{
+    const oldest=await direct(alice,b),second=await direct(alice,a),empty=await direct(alice,sibling),hidden=await direct(outsider,b);
+    await pools.migration.query(`UPDATE conversations SET created_at=CASE id WHEN $1 THEN '2026-01-01T00:00:00Z'::timestamptz WHEN $2 THEN '2026-01-02T00:00:00Z'::timestamptz ELSE '2026-01-03T00:00:00Z'::timestamptz END`,[oldest.id,second.id]);
+    await post(alice,`/api/v1/conversations/${oldest.id}/messages`,{body:'earlier message'});
+    const latest=(await post(b,`/api/v1/conversations/${oldest.id}/messages`,{body:'latest reply'})).json();
+    const other=(await post(alice,`/api/v1/conversations/${second.id}/messages`,{body:'second conversation'})).json();
+    await post(outsider,`/api/v1/conversations/${hidden.id}/messages`,{body:'private to outsider'});
+    await pools.migration.query("UPDATE messages SET created_at=CASE id WHEN $1 THEN '2026-01-04T00:00:00.123456Z'::timestamptz WHEN $2 THEN '2026-01-04T00:00:00.123455Z'::timestamptz ELSE '2026-01-03T00:00:00Z'::timestamptz END",[latest.id,other.id]);
+    const first=(await get(alice,'/api/v1/conversations?limit=1')).json();
+    expect(first.items).toHaveLength(1);expect(first.items[0].id).toBe(oldest.id);
+    expect(first.items[0].created_at).toBe('2026-01-01T00:00:00.000Z');
+    expect(first.items[0].last_message).toMatchObject({id:latest.id,body:'latest reply',sender_agent_id:b.id,sender_user_id:null});
+    expect(first.items[0].last_message).not.toHaveProperty('actor_user_id');
+    const next=(await get(alice,`/api/v1/conversations?limit=1&cursor=${first.next_cursor}`)).json();
+    expect(next.items.map((conversation:{id:string})=>conversation.id)).toEqual([second.id]);
+    expect(next.items[0].last_message).toMatchObject({id:other.id,body:'second conversation'});
+    const last=(await get(alice,`/api/v1/conversations?limit=1&cursor=${next.next_cursor}`)).json();
+    expect(last.items.map((conversation:{id:string})=>conversation.id)).toEqual([empty.id]);
+    expect(last.items[0].last_message).toBeNull();expect(last.next_cursor).toBeNull();
+    const detail=(await get(alice,`/api/v1/conversations/${oldest.id}`)).json();
+    expect(detail.last_message).toEqual(first.items[0].last_message);
+    expect((await get(outsider,`/api/v1/conversations/${oldest.id}`)).statusCode).toBe(403);
+  });
+
   it('keeps task discussion private to participants and treats negotiation as text without changing the contract',async()=>{
     const taskId=await taskFixture();
     expect((await get(outsider,`/api/v1/tasks/${taskId}/messages`)).statusCode).toBe(403);
