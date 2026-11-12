@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { withTransaction } from '@agentzero/database';
-import { CreateConversation,IdParams,MessageQuery,PageQuery,SendMessage,type CreateConversationInput,type SendMessageInput } from '@agentzero/contracts';
+import { AddGroupMembers,CreateConversation,CreateGroupConversation,GroupMemberCommand,GroupMemberParams,IdParams,MessageQuery,PageQuery,RenameGroupConversation,SendMessage,SetGroupMemberRole,type AddGroupMembersInput,type CreateConversationInput,type CreateGroupConversationInput,type GroupMemberCommandInput,type RenameGroupConversationInput,type SendMessageInput,type SetGroupMemberRoleInput } from '@agentzero/contracts';
 import { AppError,audit,decodeCursor,lockActor,paginated } from '../../core.js';
 import { command,type ApiContext } from '../../http.js';
-import { accessParams,appendMessage,conversationAccess,conversationBody,messagePage,messageUserId,requireConversation,requireTaskDiscussion,sendingAgent } from './service.js';
+import { accessParams,appendMessage,conversationAccess,conversationBody,createGroupConversation,inviteGroupMembers,leaveGroupConversation,lockGroup,messagePage,messageUserId,removeGroupMember,renameGroupConversation,requireConversation,requireGroup,requireTaskDiscussion,sendingAgent,setGroupMemberRole } from './service.js';
 
 export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
   app.get('/api/v1/message-recipients',async request=>withTransaction(ctx.pool,async tx=>{
@@ -42,10 +42,62 @@ export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
       return {status:inserted.rowCount?201:200,body:await conversationBody(tx,conversation),resourceType:'conversation',resourceId:conversation.id};
     });
   });
+  // Group chats are created by a user or Agent identity that becomes the single owner.
+  app.post<{Body:CreateGroupConversationInput}>('/api/v1/conversations/groups',{schema:{body:CreateGroupConversation}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    const ownerIds=request.body.member_agent_ids?.length
+      ?(await ctx.pool.query<{owner_user_id:string}>('SELECT owner_user_id FROM agents WHERE id=ANY($1::uuid[])',[request.body.member_agent_ids])).rows.map(row=>row.owner_user_id)
+      :[];
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{}),userIds:[...(request.body.member_user_ids??[]),...ownerIds]},async tx=>createGroupConversation(tx,request.actor,request.id,request.body,sender));
+  });
   app.get<{Params:{id:string}}>('/api/v1/conversations/:id',{schema:{params:IdParams}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});
     return conversationBody(tx,await requireConversation(tx,request.params.id,request.actor));
   }));
+  app.patch<{Params:{id:string};Body:RenameGroupConversationInput}>('/api/v1/conversations/:id',{schema:{params:IdParams,body:RenameGroupConversation}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{})},async tx=>{
+      const group=await requireGroup(tx,request.params.id,request.actor);
+      return renameGroupConversation(tx,request.actor,request.id,await lockGroup(tx,group.id),request.body.title,sender);
+    });
+  });
+  app.post<{Params:{id:string};Body:AddGroupMembersInput}>('/api/v1/conversations/:id/members',{schema:{params:IdParams,body:AddGroupMembers}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    const ownerIds=request.body.member_agent_ids?.length
+      ?(await ctx.pool.query<{owner_user_id:string}>('SELECT owner_user_id FROM agents WHERE id=ANY($1::uuid[])',[request.body.member_agent_ids])).rows.map(row=>row.owner_user_id)
+      :[];
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{}),userIds:[...(request.body.member_user_ids??[]),...ownerIds]},async tx=>{
+      const group=await requireGroup(tx,request.params.id,request.actor);
+      return inviteGroupMembers(tx,request.actor,request.id,await lockGroup(tx,group.id),request.body,sender);
+    });
+  });
+  app.patch<{Params:{id:string;memberId:string};Body:SetGroupMemberRoleInput}>('/api/v1/conversations/:id/members/:memberId',{schema:{params:GroupMemberParams,body:SetGroupMemberRole}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{})},async tx=>{
+      const group=await requireGroup(tx,request.params.id,request.actor);
+      return setGroupMemberRole(tx,request.actor,request.id,await lockGroup(tx,group.id),request.params.memberId,request.body.role,sender);
+    });
+  });
+  app.delete<{Params:{id:string;memberId:string};Body:GroupMemberCommandInput}>('/api/v1/conversations/:id/members/:memberId',{schema:{params:GroupMemberParams,body:GroupMemberCommand}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body?.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{})},async tx=>{
+      const group=await requireGroup(tx,request.params.id,request.actor);
+      return removeGroupMember(tx,request.actor,request.id,await lockGroup(tx,group.id),request.params.memberId,sender);
+    });
+  });
+  app.post<{Params:{id:string};Body:GroupMemberCommandInput}>('/api/v1/conversations/:id/leave',{schema:{params:IdParams,body:GroupMemberCommand}},async(request,reply)=>{
+    const sender=sendingAgent(request.actor,request.body?.sender_agent_id);
+    if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
+    return command(ctx,request,reply,{...(sender?{agentId:sender}:{})},async tx=>{
+      const group=await requireGroup(tx,request.params.id,request.actor);
+      return leaveGroupConversation(tx,request.actor,request.id,await lockGroup(tx,group.id),sender);
+    });
+  });
   app.get<{Params:{id:string};Querystring:{after?:string;limit?:string}}>('/api/v1/conversations/:id/messages',{schema:{params:IdParams,querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});await requireConversation(tx,request.params.id,request.actor);
     return messagePage(tx,request.actor,request.query,request.params.id);

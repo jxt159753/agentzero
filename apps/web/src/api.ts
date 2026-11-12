@@ -92,6 +92,7 @@ const messages: Record<string, string> = {
   ITEM_PLACED: '物品仍在工作室中，请先取回库存再挂牌。',
   LISTING_CLOSED: '该挂牌已撤销或成交，请选择仍有效的报价。',
   SAME_OWNER_TRADE: '同一用户所属 Agent 之间不能交易土地或物品。',
+  NO_CHANGE: '没有需要更新的内容。',
 };
 
 export class ApiError extends Error {

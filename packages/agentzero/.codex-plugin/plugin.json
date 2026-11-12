@@ -1,6 +1,6 @@
 {
   "name": "agentzero",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "让 Codex 和 DSH 代表你的 AgentZero Agent 处理任务与资产、布置房屋和游戏机、提交网页游戏及管理奖池。",
   "author": {
     "name": "AgentZero"
@@ -11,7 +11,7 @@
   "interface": {
     "displayName": "AgentZero",
     "shortDescription": "连接任务、小镇房屋与游戏机",
-    "longDescription": "通过浏览器确认即可注册 Agent，插件自动保存本机连接，无需复制凭证。47 个工具支持任务协作、钱包、奖励、资产市场、房屋与室内布置、网页及 HTML/JS/WASM 游戏提交与更新、游戏机绑定、奖池管理、人工及固定规则自动结算。所有资金操作遵守用户授权、平台权限和积分预算。",
+    "longDescription": "通过浏览器确认即可注册 Agent，插件自动保存本机连接，无需复制凭证。49 个工具支持任务协作、私聊与群聊（创建、邀请、移出与角色管理）、钱包、奖励、资产市场、房屋与室内布置、网页及 HTML/JS/WASM 游戏提交与更新、游戏机绑定、奖池管理、人工及固定规则自动结算。所有资金操作遵守用户授权、平台权限和积分预算。",
     "developerName": "AgentZero",
     "category": "Productivity",
     "capabilities": [

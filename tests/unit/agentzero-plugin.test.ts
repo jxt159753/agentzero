@@ -62,7 +62,7 @@ describe('shared AgentZero MCP adapter', () => {
     const { tools } = await client.listTools();
     expect(tools.map(tool => tool.name)).toEqual(['agentzero_register','agentzero_identity','agentzero_wallet','agentzero_repositories','agentzero_list_tasks','agentzero_get_task','agentzero_accept_task','agentzero_submit_delivery','agentzero_get_operation',
       'agentzero_propose_agreement','agentzero_respond_agreement','agentzero_submit_contribution','agentzero_propose_cancellation','agentzero_accept_cancellation','agentzero_dispute_task',
-      'agentzero_list_conversations','agentzero_list_agents','agentzero_create_conversation','agentzero_read_messages','agentzero_send_message','agentzero_poll_messages',
+      'agentzero_list_conversations','agentzero_list_agents','agentzero_create_conversation','agentzero_get_conversation','agentzero_group','agentzero_read_messages','agentzero_send_message','agentzero_poll_messages',
       'agentzero_reward_catalog','agentzero_redeem_reward','agentzero_list_reward_redemptions','agentzero_get_reward_redemption','agentzero_cancel_reward_redemption',
       'agentzero_market_catalog','agentzero_market_assets','agentzero_get_market_asset','agentzero_buy_market_asset',
       'agentzero_create_market_listing','agentzero_cancel_market_listing','agentzero_update_studio','agentzero_place_market_item',
@@ -70,7 +70,7 @@ describe('shared AgentZero MCP adapter', () => {
       'agentzero_world_models','agentzero_games','agentzero_create_game','agentzero_update_game','agentzero_game_pool','agentzero_bind_game_machine','agentzero_start_game_session','agentzero_game_session']);
     for (const tool of tools) {
       expect(tool.inputSchema.additionalProperties).toBe(false);
-      const write = ['agentzero_accept_task','agentzero_submit_delivery','agentzero_propose_agreement','agentzero_respond_agreement','agentzero_submit_contribution','agentzero_propose_cancellation','agentzero_accept_cancellation','agentzero_dispute_task','agentzero_create_conversation','agentzero_send_message','agentzero_redeem_reward','agentzero_cancel_reward_redemption',
+      const write = ['agentzero_accept_task','agentzero_submit_delivery','agentzero_propose_agreement','agentzero_respond_agreement','agentzero_submit_contribution','agentzero_propose_cancellation','agentzero_accept_cancellation','agentzero_dispute_task','agentzero_create_conversation','agentzero_group','agentzero_send_message','agentzero_redeem_reward','agentzero_cancel_reward_redemption',
         'agentzero_buy_market_asset','agentzero_create_market_listing','agentzero_cancel_market_listing','agentzero_update_studio','agentzero_place_market_item',
         'agentzero_world_models','agentzero_create_game','agentzero_update_game','agentzero_game_pool','agentzero_bind_game_machine','agentzero_start_game_session','agentzero_game_session'].includes(tool.name);
       const presence = ['agentzero_register', 'agentzero_world_presence', 'agentzero_world_leave'].includes(tool.name);
@@ -261,6 +261,35 @@ describe('shared AgentZero MCP adapter', () => {
     expect((await client.callTool({ name: 'agentzero_send_message', arguments: { ...input, task_id: taskId } })).isError).toBe(true);
     expect((await client.callTool({ name: 'agentzero_read_messages', arguments: {} })).isError).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('creates and administers group chats with one idempotent action per call', async () => {
+    fetcher.mockImplementation(async () => Response.json({ id: operationId, members: [] }));
+    const client = await connect();
+    const cases: [{ action: string; [key: string]: unknown }, string, string, Record<string, unknown>][] = [
+      [{ action: 'create', title: '群聊联调', member_agent_ids: [taskId] }, 'POST', '/api/v1/conversations/groups', { title: '群聊联调', member_agent_ids: [taskId] }],
+      [{ action: 'invite', conversation_id: operationId, member_user_ids: [taskId] }, 'POST', `/api/v1/conversations/${operationId}/members`, { member_user_ids: [taskId] }],
+      [{ action: 'remove', conversation_id: operationId, member_id: taskId }, 'DELETE', `/api/v1/conversations/${operationId}/members/${taskId}`, {}],
+      [{ action: 'set_role', conversation_id: operationId, member_id: taskId, role: 'admin' }, 'PATCH', `/api/v1/conversations/${operationId}/members/${taskId}`, { role: 'admin' }],
+      [{ action: 'rename', conversation_id: operationId, title: '新群名' }, 'PATCH', `/api/v1/conversations/${operationId}`, { title: '新群名' }],
+      [{ action: 'leave', conversation_id: operationId }, 'POST', `/api/v1/conversations/${operationId}/leave`, {}],
+    ];
+    for (const [operation, method, path, body] of cases) {
+      const key = `group-${operation.action}-001`;
+      expect((await client.callTool({ name: 'agentzero_group', arguments: { operation, idempotency_key: key } })).isError).not.toBe(true);
+      const [url, options] = fetcher.mock.calls.at(-1)!;
+      expect(new URL(String(url)).pathname).toBe(path);
+      expect(options).toMatchObject({ method, headers: { authorization: `Bearer ${agentKey}`, 'idempotency-key': key } });
+      expect(JSON.parse(options!.body as string)).toEqual(body);
+    }
+    expect((await client.callTool({ name: 'agentzero_get_conversation', arguments: { conversation_id: operationId } })).isError).not.toBe(true);
+    expect(new URL(String(fetcher.mock.calls.at(-1)![0])).pathname).toBe(`/api/v1/conversations/${operationId}`);
+    expect(fetcher.mock.calls.at(-1)![1]).toMatchObject({ method: 'GET', headers: { authorization: `Bearer ${agentKey}` } });
+    const before = fetcher.mock.calls.length;
+    for (const args of [{ operation: { action: 'create', title: '' }, idempotency_key: 'group-invalid-001' }, { operation: { action: 'remove', conversation_id: operationId }, idempotency_key: 'group-invalid-002' }]) {
+      expect((await client.callTool({ name: 'agentzero_group', arguments: args })).isError).toBe(true);
+    }
+    expect(fetcher).toHaveBeenCalledTimes(before);
   });
 
   it('binds reward spending to the credential, preserves QQ and retries, and exposes no payout tools', async () => {

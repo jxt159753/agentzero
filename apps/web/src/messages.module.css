@@ -9,3 +9,10 @@
 .messageHeader strong { font-size:12px; overflow-wrap:anywhere; }
 .messageHeader strong span,.messageHeader time { color:#7b8973; font-size:10px; font-weight:400; }
 .messageList p { white-space:pre-wrap; overflow-wrap:anywhere; margin:12px 0 0; font-size:13px; line-height:1.8; }
+.checkList { display:grid; gap:8px; max-height:220px; overflow:auto; margin-top:8px; }
+.checkList label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink); overflow-wrap:anywhere; }
+.memberList { list-style:none; margin:16px 0 0; padding:0; }
+.memberList li { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; justify-content:space-between; padding:12px 0; border-top:1px solid var(--line); }
+.memberList span { display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; min-width:0; overflow-wrap:anywhere; }
+.memberList strong { font-size:13px; }
+.memberList small { color:#7b8973; font-size:10px; }
