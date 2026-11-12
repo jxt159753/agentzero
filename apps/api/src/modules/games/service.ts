@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor, CreateGameInput, GameDto, GameSessionDto, GameSettlementRuleId, GameSourceInput, PatchGameInput, SettleGameSessionInput, SubmitGameScoreInput } from '@agentzero/contracts';
+import type { Actor, AdminGameModerationInput, CreateGameInput, GameDto, GameSessionDto, GameSettlementRuleId, GameSourceInput, PatchGameInput, SettleGameSessionInput, SubmitGameScoreInput } from '@agentzero/contracts';
 import { GAME_BUNDLE_MAX_BYTES, parseAmount } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError, audit, lockActor, type CommandResult } from '../../core.js';
@@ -9,7 +9,7 @@ import { starlightSlotsResult } from './rules.js';
 type GameSourceMetadata = { type: 'url'; url: string } | { type: 'bundle'; entry: string };
 interface GameRow extends Omit<GameDto, 'source_type' | 'entry_url' | 'available_pool' | 'accepting_players'> { source: GameSourceMetadata; pool_hold_id: string | null; author_available: boolean }
 interface SessionRow extends GameSessionDto { fee_hold_id: string; game_version: string }
-const gameFields = `id,author_agent_id,owner_user_id,name,description,entry_fee::text,max_reward::text,minimum_pool::text,settlement_rule,status,version::text,pool_balance::text,pool_committed::text,pool_hold_id,source-'files' AS source,created_at,
+const gameFields = `id,author_agent_id,owner_user_id,name,description,entry_fee::text,max_reward::text,minimum_pool::text,settlement_rule,status,moderation_blocked,version::text,pool_balance::text,pool_committed::text,pool_hold_id,source-'files' AS source,created_at,
   (SELECT a.status='active' AND a.deleted_at IS NULL AND u.status='active' FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.id=author_agent_id) AS author_available`;
 const sessionFields = 'id,game_id,player_agent_id,player_user_id,fee_hold_id,game_version::text,entry_fee::text,max_reward::text,settlement_rule,status,score::text,reward_requested::text,reward_points::text,expires_at,created_at';
 const userId = (actor: Actor) => actor.type === 'user' ? actor.userId : actor.type === 'agent' ? actor.ownerUserId : null;
@@ -55,8 +55,8 @@ function dto(game: GameRow): GameDto {
   const { source, pool_hold_id: _hold, author_available: authorAvailable, ...publicGame } = game;
   const available = BigInt(game.pool_balance) - BigInt(game.pool_committed);
   return { ...publicGame, created_at: new Date(game.created_at).toISOString(), source_type: source.type,
-    entry_url: source.type === 'url' ? source.url : `/game-content/${game.id}/${source.entry}`,
-    available_pool: available.toString(), accepting_players: authorAvailable && game.status === 'active' && available >= BigInt(game.minimum_pool) };
+    entry_url: game.moderation_blocked ? '' : source.type === 'url' ? source.url : `/game-content/${game.id}/${source.entry}`,
+    available_pool: available.toString(), accepting_players: !game.moderation_blocked && authorAvailable && game.status === 'active' && available >= BigInt(game.minimum_pool) };
 }
 function sessionDto(session: SessionRow): GameSessionDto {
   const { fee_hold_id: _hold, game_version: _version, ...publicSession } = session;
@@ -88,12 +88,32 @@ async function expired(tx: Tx, session: SessionRow) {
 }
 
 export async function listGames(tx: Tx, actor: Actor, mine: boolean) {
-  const rows = (await tx.query<GameRow>(`SELECT ${gameFields} FROM arcade_games WHERE ${mine ? 'owner_user_id=$1' : "status='active' OR owner_user_id=$1"} ORDER BY created_at DESC,id LIMIT 100`, [userId(actor)])).rows;
+  const rows = (await tx.query<GameRow>(`SELECT ${gameFields} FROM arcade_games WHERE ${mine ? 'owner_user_id=$1' : "(status='active' AND NOT moderation_blocked) OR owner_user_id=$1"} ORDER BY created_at DESC,id LIMIT 100`, [userId(actor)])).rows;
   return { items: rows.map(dto) };
 }
 export async function getGame(tx: Tx, id: string) { return dto(await gameRow(tx, id)); }
+export async function readGame(tx: Tx, actor: Actor, id: string, admin = false) {
+  const game = await gameRow(tx, id);
+  if (!game.moderation_blocked || admin || isAuthor(actor, game)) return dto(game);
+  const participant = await tx.query(`SELECT 1 FROM arcade_game_sessions WHERE game_id=$1 AND ${actor.type === 'agent' ? 'player_agent_id=$2' : 'player_user_id=$2'} LIMIT 1`,
+    [id, actor.type === 'agent' ? actor.agentId : userId(actor)]);
+  if (!participant.rowCount) throw new AppError('NOT_FOUND', 404);
+  // Previous players can reopen their receipts and refund controls without redisplaying removed content.
+  return { ...dto(game), name: '已下架游戏', description: '' };
+}
+export async function adminGames(tx: Tx) {
+  return { items: (await tx.query<GameRow>(`SELECT ${gameFields} FROM arcade_games ORDER BY created_at DESC,id`)).rows.map(dto) };
+}
+export async function moderateGame(tx: Tx, actor: Actor, requestId: string, id: string, input: AdminGameModerationInput) {
+  const game = await gameRow(tx, id, true);
+  if (game.version !== input.version) throw new AppError('GAME_VERSION_CONFLICT', 409, '游戏已更新，请刷新后重试');
+  await tx.query('UPDATE arcade_games SET moderation_blocked=$2,version=version+1 WHERE id=$1', [id, input.moderation_blocked]);
+  await audit(tx, actor, 'admin.game_moderated', 'game', id, requestId, { ...input, previous_moderation_blocked: game.moderation_blocked });
+  // Only availability changes. Existing sessions retain their terms, fees, rewards and timeout settlement path.
+  return result(await getGame(tx, id));
+}
 export async function getGameContent(tx: Tx, id: string, path: string) {
-  const game = (await tx.query<{ source: GameSourceInput }>('SELECT source FROM arcade_games WHERE id=$1', [id])).rows[0];
+  const game = (await tx.query<{ source: GameSourceInput }>('SELECT source FROM arcade_games WHERE id=$1 AND NOT moderation_blocked', [id])).rows[0];
   if (!game || game.source.type !== 'bundle' || !validGamePath(path)) throw new AppError('NOT_FOUND', 404);
   const file = game.source.files.find(item => item.path === path);
   if (!file) throw new AppError('NOT_FOUND', 404);
@@ -144,16 +164,18 @@ export async function withdrawGame(tx: Tx, actor: Actor, requestId: string, id: 
 }
 
 export async function getMachine(tx: Tx, placementId: string) {
-  const model = (await tx.query('SELECT model_id FROM world_model_placements WHERE id=$1', [placementId])).rows[0];
+  const model = (await tx.query('SELECT m.model_id FROM world_model_placements m JOIN land_plots l ON l.id=m.land_id WHERE m.id=$1 AND NOT l.showcase_hidden', [placementId])).rows[0];
   if (!model || model.model_id !== 'arcade') throw new AppError('NOT_FOUND', 404, '游戏机不存在');
   const row = (await tx.query<{ game_id: string }>('SELECT game_id FROM arcade_game_machines WHERE placement_id=$1', [placementId])).rows[0];
-  return { placement_id: placementId, game: row ? await getGame(tx, row.game_id) : null };
+  const game = row ? await getGame(tx, row.game_id) : null;
+  return { placement_id: placementId, game: game?.moderation_blocked ? null : game };
 }
 export async function bindMachine(tx: Tx, actor: Actor, requestId: string, placementId: string, gameId: string | null) {
   const model = (await tx.query('SELECT land_id,model_id FROM world_model_placements WHERE id=$1', [placementId])).rows[0];
   if (!model || model.model_id !== 'arcade') throw new AppError('NOT_FOUND', 404, '游戏机不存在');
-  const land = (await tx.query('SELECT owner_user_id,owner_agent_id FROM land_plots WHERE id=$1 FOR UPDATE', [model.land_id])).rows[0];
+  const land = (await tx.query('SELECT owner_user_id,owner_agent_id,showcase_hidden FROM land_plots WHERE id=$1 FOR UPDATE', [model.land_id])).rows[0];
   if (land.owner_user_id !== userId(actor) || actor.type === 'agent' && actor.agentId !== land.owner_agent_id) throw new AppError('ACCESS_DENIED', 403);
+  if (land.showcase_hidden) throw new AppError('CONTENT_MODERATED', 409, '此地块展示已被管理员屏蔽');
   if ((await tx.query("SELECT 1 FROM market_listings WHERE land_id=$1 AND status='active'", [model.land_id])).rowCount) throw new AppError('ASSET_LISTED', 409);
   // Recheck the placement after obtaining the same land lock as placement deletion.
   if (!(await tx.query('SELECT 1 FROM world_model_placements WHERE id=$1 AND land_id=$2', [placementId, model.land_id])).rowCount) throw new AppError('NOT_FOUND', 404);
@@ -171,7 +193,7 @@ export async function startSession(tx: Tx, actor: Actor, requestId: string, id: 
   const game = await gameRow(tx, id, true);
   if (game.version !== version) throw new AppError('GAME_VERSION_CONFLICT', 409);
   const author = (await tx.query('SELECT a.status,a.deleted_at,u.status AS user_status FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.id=$1', [game.author_agent_id])).rows[0];
-  if (game.status !== 'active' || !author || author.status !== 'active' || author.deleted_at || author.user_status !== 'active') throw new AppError('GAME_UNAVAILABLE', 409);
+  if (game.moderation_blocked || game.status !== 'active' || !author || author.status !== 'active' || author.deleted_at || author.user_status !== 'active') throw new AppError('GAME_UNAVAILABLE', 409);
   if (BigInt(game.pool_balance) - BigInt(game.pool_committed) < BigInt(game.minimum_pool)) throw new AppError('GAME_POOL_LOW', 409, '可用奖池低于最低开放额度，补足后自动恢复');
   const sessionId = randomUUID(), hold = await reserve(tx, { actor, requestId }, { businessRef: `game:${id}:session:${sessionId}`, payerAgentId: agentId ?? null,
     ...(!agentId && actor.type === 'user' ? { payerUserId: actor.userId } : {}), amount: game.entry_fee, permission: 'can_trade', reason: `游戏「${game.name}」单局费用` });

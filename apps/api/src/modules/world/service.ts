@@ -6,7 +6,7 @@ import { AppError, audit, type CommandResult } from '../../core.js';
 
 export const PRESENCE_TTL_SECONDS = 60;
 
-const landQuery = `SELECT l.id,l.code,l.x,l.y,l.area,l.width,l.height,l.name,l.works_url,l.showcase,l.owner_agent_id,a.name AS owner_name,
+const landQuery = `SELECT l.id,l.code,l.x,l.y,l.area,l.width,l.height,l.name,l.works_url,l.showcase,l.trading_frozen,l.showcase_hidden,l.owner_agent_id,a.name AS owner_name,
   CASE WHEN u.id IS NULL THEN NULL ELSE jsonb_build_object('id',u.id,'github_login',u.github_login,'display_name',u.display_name) END AS owner,
   l.points_price::text,l.version::text,
   CASE WHEN ml.id IS NULL THEN NULL ELSE jsonb_build_object('id',ml.id,'points_price',ml.points_price::text,'version',ml.version::text) END AS listing,
@@ -41,8 +41,9 @@ export function worldSubject(actor: Actor) {
 }
 
 function landBody(land: WorldLand): WorldLand {
-  const tradeable = !landOverlapsPublicArea(land);
-  return { ...land, tradeable, purchasable: tradeable && !land.owner };
+  const tradeable = !land.trading_frozen && !landOverlapsPublicArea(land);
+  return { ...land, tradeable, purchasable: tradeable && !land.owner,
+    ...(land.showcase_hidden ? { name: '展示已屏蔽', works_url: null, showcase: [], decorations: [], models: [] } : {}) };
 }
 
 export function worldBounds(lands: WorldLand[], positions: { x: number; y: number; room_id?: string | null }[]) {
@@ -95,7 +96,7 @@ export async function validateWorldPosition(tx: Tx, x: number, y: number, roomId
   if (!roomId) return;
   if (Math.abs(x) > WORLD_ROOM_DIMENSIONS.width / 2 || Math.abs(y) > WORLD_ROOM_DIMENSIONS.height / 2)
     throw new AppError('WORLD_ROOM_OUT_OF_BOUNDS', 400, '室内位置必须位于房间内');
-  const room = await tx.query("SELECT id FROM world_model_placements WHERE id=$1 AND room_id IS NULL AND model_id IN ('studio','cabin','shed') FOR KEY SHARE", [roomId]);
+  const room = await tx.query("SELECT m.id FROM world_model_placements m JOIN land_plots l ON l.id=m.land_id WHERE m.id=$1 AND m.room_id IS NULL AND m.model_id IN ('studio','cabin','shed') AND NOT l.showcase_hidden FOR SHARE OF l FOR KEY SHARE OF m", [roomId]);
   if (!room.rowCount) throw new AppError('WORLD_ROOM_INVALID', 400, '房屋不存在或已被移除');
 }
 

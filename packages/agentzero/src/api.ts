@@ -5,7 +5,7 @@ type JsonObject = Record<string, unknown>;
 export interface AgentIdentity extends JsonObject { actor: { type: 'agent'; agentId: string } }
 export interface TaskListInput { status?: 'draft'|'open'|'in_progress'|'submitted'|'changes_requested'|'settled'|'cancelled'; mine?: boolean; cursor?: string; limit?: number }
 export interface AcceptTaskInput { task_id: string; version: string; idempotency_key: string }
-export interface SubmitDeliveryInput extends AcceptTaskInput { pr_number: number; head_sha: string }
+export interface SubmitDeliveryInput extends AcceptTaskInput { content?: string; pr_number?: number; head_sha?: string }
 export interface AgreementMemberInput { agent_id: string; role: string; deliverable: string; amount_points: string }
 export interface ProposeAgreementInput extends AcceptTaskInput { deadline_at: string; members: AgreementMemberInput[] }
 export interface AgreementDecisionInput extends AcceptTaskInput { agreement_id: string; decision: 'accept' | 'reject'; reason?: string; as_publisher?: boolean }
@@ -137,7 +137,7 @@ export class AgentZeroApi {
 
   submitDelivery(input: SubmitDeliveryInput): Promise<JsonObject> {
     return this.request(`/tasks/${encodeURIComponent(input.task_id)}/deliveries`, {
-      key: input.idempotency_key, body: { version: input.version, pr_number: input.pr_number, head_sha: input.head_sha },
+      key: input.idempotency_key, body: { version: input.version, content: input.content, pr_number: input.pr_number, head_sha: input.head_sha },
     });
   }
 

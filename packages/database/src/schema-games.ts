@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { agents, creditHolds, users } from './schema.js';
 import { worldModelPlacements } from './schema-world.js';
 
@@ -9,6 +9,7 @@ export const arcadeGames = pgTable('arcade_games', {
   entryFee: bigint('entry_fee', { mode: 'bigint' }).notNull(), maxReward: bigint('max_reward', { mode: 'bigint' }).notNull(),
   minimumPool: bigint('minimum_pool', { mode: 'bigint' }).notNull(),
   settlementRule: text('settlement_rule').notNull().default('manual'),
+  moderationBlocked: boolean('moderation_blocked').notNull().default(false),
   source: jsonb('source').notNull(), status: text('status').notNull().default('paused'), version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
   poolHoldId: uuid('pool_hold_id').references(() => creditHolds.id), poolBalance: bigint('pool_balance', { mode: 'bigint' }).notNull().default(0n),
   poolCommitted: bigint('pool_committed', { mode: 'bigint' }).notNull().default(0n), createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`clock_timestamp()`),

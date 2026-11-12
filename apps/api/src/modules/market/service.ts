@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { landOverlapsPublicArea, parseAmount, WORLD_METERS_PER_UNIT, worldLandSize, type Actor, type BuyMarketAssetInput, type CancelMarketListingInput, type CreateItemTemplateInput,
   type CreateLandSupplyInput, type CreateMarketListingInput, type ItemInstanceDto, type ItemTemplateDto, type LandPlotDto,
   type MarketAssetsDto, type MarketCatalogDto, type MarketListingDto, type MarketSettingsDto, type MarketTradeDto,
-  type PatchItemTemplateInput, type PatchLandPriceInput, type PatchStudioInput, type PlaceMarketItemInput, type PutMarketSettingsInput } from '@agentzero/contracts';
+  type PatchItemTemplateInput, type PatchLandPriceInput, type PatchStudioInput, type PlaceMarketItemInput, type PutMarketSettingsInput,
+  type AdminAssetActionInput, type AdminAssetCatalog, type AdminAssetTransferInput, type AdminLandModerationInput, type AdminItemModerationInput } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError, audit, type CommandResult } from '../../core.js';
 import { finalizeHold, pay, reserve } from '../ledger/service.js';
@@ -14,18 +15,22 @@ type ListingRow = Omit<MarketListingDto, 'land' | 'item' | 'created_at'> & { cre
 
 const landSelect = `SELECT l.id,l.code,l.x,l.y,l.area,l.width,l.height,l.points_price,l.building_template,l.owner_agent_id,
   a.name AS owner_agent_name,l.owner_user_id,u.github_login AS owner_github_login,
-  l.name,l.works_url,l.showcase,l.version,l.created_at,ml.id AS active_listing_id
+  l.name,l.works_url,l.showcase,l.trading_frozen,l.showcase_hidden,l.version,l.created_at,ml.id AS active_listing_id
   FROM land_plots l LEFT JOIN agents a ON a.id=l.owner_agent_id
   LEFT JOIN users u ON u.id=l.owner_user_id
   LEFT JOIN market_listings ml ON ml.land_id=l.id AND ml.status='active'`;
-const itemSelect = `SELECT i.id,i.template_id,i.owner_agent_id,i.land_id,i.version,i.created_at,
+const itemSelect = `SELECT i.id,i.template_id,i.owner_agent_id,i.land_id,i.trading_frozen,i.version,i.created_at,
   t.name,t.description,t.appearance,ml.id AS active_listing_id FROM item_instances i
   JOIN item_templates t ON t.id=i.template_id LEFT JOIN market_listings ml ON ml.item_id=i.id AND ml.status='active'`;
 const listingSelect = `SELECT ml.id,ml.seller_agent_id,a.name AS seller_agent_name,a.owner_user_id AS seller_user_id,
   ml.land_id,ml.item_id,ml.points_price,ml.status,ml.version,ml.created_at FROM market_listings ml JOIN agents a ON a.id=ml.seller_agent_id`;
 
 const dated = <T extends { created_at: Date | string }>(row: T) => ({ ...row, created_at: new Date(row.created_at).toISOString() });
-const landBody = (row: LandRow): LandPlotDto => ({ ...dated(row), tradeable: !landOverlapsPublicArea(row) });
+const landBody = (row: LandRow, admin = false): LandPlotDto => ({ ...dated(row), tradeable: !row.trading_frozen && !landOverlapsPublicArea(row),
+  ...(!admin && row.showcase_hidden ? { name: '展示已屏蔽', works_url: null, showcase: [] } : {}) });
+function tradable(asset: { trading_frozen?: boolean }) {
+  if (asset.trading_frozen) throw new AppError('ASSET_TRADING_FROZEN', 409, '管理员已冻结此资产交易');
+}
 function requirePrivateLand(land: { x: number; y: number; area: number; width?: number | null; height?: number | null }) {
   if (landOverlapsPublicArea(land)) throw new AppError('PUBLIC_LAND_NOT_TRADEABLE', 409, '公共广场、道路和公共设施用地不可购买或挂牌');
 }
@@ -65,10 +70,10 @@ async function requireLandCapacity(tx: Tx, actor: Actor) {
   // runCommand holds the owner's user row, serializing all their Agents' acquisitions.
   if (await userLandCount(tx, marketUserId(actor)) >= config.user_land_limit) throw new AppError('LAND_LIMIT_EXCEEDED', 409, '已达到每位用户合计持有的土地上限');
 }
-export async function loadLand(tx: Tx, id: string, lock = false): Promise<LandPlotDto> {
+export async function loadLand(tx: Tx, id: string, lock = false, admin = false): Promise<LandPlotDto> {
   const row = (await tx.query<LandRow>(`${landSelect} WHERE l.id=$1${lock ? ' FOR UPDATE OF l' : ''}`, [id])).rows[0];
   if (!row) throw new AppError('NOT_FOUND', 404, '地块不存在');
-  return landBody(row);
+  return landBody(row, admin);
 }
 export async function loadItem(tx: Tx, id: string, lock = false): Promise<ItemInstanceDto> {
   const row = (await tx.query<ItemRow>(`${itemSelect} WHERE i.id=$1${lock ? ' FOR UPDATE OF i' : ''}`, [id])).rows[0];
@@ -115,13 +120,13 @@ export async function readItem(tx: Tx, id: string, actor: Actor) {
 }
 export async function marketCatalog(tx: Tx, actor: Actor, admin = false): Promise<MarketCatalogDto> {
   const config = await settings(tx);
-  const lands = (await tx.query<LandRow>(`${landSelect} ORDER BY l.created_at DESC,l.id DESC`)).rows.map(landBody);
+  const lands = (await tx.query<LandRow>(`${landSelect} ORDER BY l.created_at DESC,l.id DESC`)).rows.map(row => landBody(row));
   const templates = (await tx.query<TemplateRow>('SELECT id,name,description,appearance,points_price,total_quantity,issued_quantity,status,version,created_at FROM item_templates ORDER BY created_at DESC,id DESC')).rows.map(templateBody);
   return { settings: config, user_land_count: await userLandCount(tx, marketUserId(actor)), lands, templates,
     listings: await listingRows(tx, admin ? 'true' : "ml.status='active'", []) };
 }
 export async function marketAssets(tx: Tx, actor: Actor, agentId: string): Promise<MarketAssetsDto> {
-  const lands = (await tx.query<LandRow>(`${landSelect} WHERE l.owner_agent_id=$1 ORDER BY l.created_at DESC,l.id DESC`, [agentId])).rows.map(landBody);
+  const lands = (await tx.query<LandRow>(`${landSelect} WHERE l.owner_agent_id=$1 ORDER BY l.created_at DESC,l.id DESC`, [agentId])).rows.map(row => landBody(row));
   const items = (await tx.query<ItemRow>(`${itemSelect} WHERE i.owner_agent_id=$1 ORDER BY i.created_at DESC,i.id DESC`, [agentId])).rows.map(dated);
   return { agent_id: agentId, settings: await settings(tx), user_land_count: await userLandCount(tx, marketUserId(actor)),
     lands, items, listings: await listingRows(tx, 'ml.seller_agent_id=$1', [agentId]) };
@@ -151,7 +156,7 @@ export async function createLandSupply(tx: Tx, actor: Actor, requestId: string, 
     if (!row) throw new AppError('LAND_SUPPLY_CONFLICT', 409, '地块编号或位置已存在，整批供应未创建');
     ids.push(row.id);
   }
-  const lands = (await tx.query<LandRow>(`${landSelect} WHERE l.id=ANY($1::uuid[]) ORDER BY l.code`, [ids])).rows.map(landBody);
+  const lands = (await tx.query<LandRow>(`${landSelect} WHERE l.id=ANY($1::uuid[]) ORDER BY l.code`, [ids])).rows.map(row => landBody(row));
   await audit(tx, actor, 'market.land_supplied', 'land_supply', ids[0]!, requestId, { reason: input.reason, count: ids.length, plots: input.plots });
   return { status: 201, body: { lands }, resourceType: 'land', resourceId: ids[0] };
 }
@@ -197,6 +202,7 @@ export async function buyLand(tx: Tx, actor: Actor, requestId: string, id: strin
   await requireLandCapacity(tx, actor);
   const land = await loadLand(tx, id, true);
   version(land.version, input.version);
+  tradable(land);
   requirePrivateLand(land);
   if (land.owner_user_id) throw new AppError('ASSET_UNAVAILABLE', 409, '地块已经售出');
   const tradeId = randomUUID();
@@ -224,6 +230,7 @@ export async function createListing(tx: Tx, actor: Actor, requestId: string, inp
   await tradePolicy(tx, input.agent_id);
   const asset = input.land_id ? await loadLand(tx, input.land_id, true) : await loadItem(tx, input.item_id!, true);
   ownership(asset.owner_agent_id, input.agent_id); version(asset.version, input.asset_version); editable(asset.active_listing_id);
+  tradable(asset);
   if ('code' in asset) requirePrivateLand(asset);
   if ('land_id' in asset && asset.land_id) throw new AppError('ITEM_PLACED', 409, '装饰物须先从地块取下，才能挂牌');
   const id = randomUUID();
@@ -237,10 +244,19 @@ export async function cancelListing(tx: Tx, actor: Actor, requestId: string, id:
   const represented = actor.type === 'agent' ? actor.agentId : actor.type === 'user' ? actor.representedAgentId : undefined;
   ownership(listing.seller_agent_id, represented ?? ''); version(listing.version, input.version);
   if (listing.status !== 'active') throw new AppError('LISTING_CLOSED', 409, '挂牌已经关闭');
+  await closeListing(tx, actor, requestId, listing);
+  return { status: 200, body: { ...await loadListing(tx, id) }, resourceType: 'market_listing', resourceId: id };
+}
+async function closeListing(tx: Tx, actor: Actor, requestId: string, listing: MarketListingDto, reason?: string) {
+  const id = listing.id;
   await tx.query("UPDATE market_listings SET status='cancelled',version=version+1,closed_at=clock_timestamp() WHERE id=$1", [id]);
   await tx.query(`UPDATE ${listing.land_id ? 'land_plots' : 'item_instances'} SET version=version+1,updated_at=clock_timestamp() WHERE id=$1`, [listing.land_id ?? listing.item_id]);
-  await audit(tx, actor, 'market.listing_cancelled', 'market_listing', id, requestId, {});
-  return { status: 200, body: { ...await loadListing(tx, id) }, resourceType: 'market_listing', resourceId: id };
+  await audit(tx, actor, reason ? 'admin.asset_listing_cancelled' : 'market.listing_cancelled', 'market_listing', id, requestId, reason ? { reason, previous_version: listing.version } : {});
+}
+export async function cancelAssetListing(tx: Tx, actor: Actor, requestId: string, id: string | null, reason: string) {
+  if (!id) return;
+  const listing = await loadListing(tx, id, true);
+  if (listing.status === 'active') await closeListing(tx, actor, requestId, listing, reason);
 }
 export async function buyListing(tx: Tx, actor: Actor, requestId: string, id: string, input: BuyMarketAssetInput): Promise<CommandResult> {
   // Both owner user rows were locked in sorted order by the route, before policy/asset/account locks.
@@ -252,6 +268,7 @@ export async function buyListing(tx: Tx, actor: Actor, requestId: string, id: st
   if (listing.land_id) await requireLandCapacity(tx, actor);
   const asset = listing.land_id ? await loadLand(tx, listing.land_id, true) : await loadItem(tx, listing.item_id!, true);
   ownership(asset.owner_agent_id, listing.seller_agent_id);
+  tradable(asset);
   if ('code' in asset) requirePrivateLand(asset);
   if (asset.active_listing_id !== id || ('land_id' in asset && asset.land_id)) throw new AppError('ASSET_UNAVAILABLE', 409);
   const tradeId = randomUUID();
@@ -259,10 +276,7 @@ export async function buyListing(tx: Tx, actor: Actor, requestId: string, id: st
     amount: listing.points_price, permission: 'can_trade', reason: `市场成交 ${id}` });
   const paid = await finalizeHold(tx, { actor, requestId }, { holdId: String(held.holdId), payments: [{ agentId: listing.seller_agent_id, amount: listing.points_price }], refund: '0', reason: `市场成交 ${id}` });
   if (listing.land_id) {
-    // Decorations stay with their seller. Clear them before changing the composite ownership FK.
-    await tx.query('UPDATE item_instances SET land_id=NULL,version=version+1,updated_at=clock_timestamp() WHERE land_id=$1', [listing.land_id]);
-    await tx.query('DELETE FROM world_model_placements WHERE land_id=$1', [listing.land_id]);
-    await tx.query("UPDATE land_plots SET owner_agent_id=$2,owner_user_id=$3,name='默认工作室',works_url=NULL,showcase='[]'::jsonb,version=version+1,updated_at=clock_timestamp() WHERE id=$1", [listing.land_id, input.agent_id, marketUserId(actor)]);
+    await changeLandOwner(tx, listing.land_id, input.agent_id, marketUserId(actor));
   } else {
     await tx.query('UPDATE item_instances SET owner_agent_id=$2,land_id=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1', [listing.item_id, input.agent_id]);
   }
@@ -270,9 +284,16 @@ export async function buyListing(tx: Tx, actor: Actor, requestId: string, id: st
   return recordTrade(tx, actor, requestId, { id: tradeId, buyerId: input.agent_id, sellerId: listing.seller_agent_id, listingId: id,
     ...(listing.land_id ? { landId: listing.land_id } : { itemId: listing.item_id! }), price: listing.points_price, transactionId: paid.transactionId, snapshot: asset });
 }
+async function changeLandOwner(tx: Tx, id: string, agentId: string, userId: string) {
+  // Paid decorations stay with their original owner. Room removal uses the existing occupant-exit trigger.
+  await tx.query('UPDATE item_instances SET land_id=NULL,version=version+1,updated_at=clock_timestamp() WHERE land_id=$1', [id]);
+  await tx.query('DELETE FROM world_model_placements WHERE land_id=$1', [id]);
+  await tx.query("UPDATE land_plots SET owner_agent_id=$2,owner_user_id=$3,name='默认工作室',works_url=NULL,showcase='[]'::jsonb,version=version+1,updated_at=clock_timestamp() WHERE id=$1", [id, agentId, userId]);
+}
 export async function patchStudio(tx: Tx, actor: Actor, requestId: string, id: string, input: PatchStudioInput): Promise<CommandResult> {
   const land = await loadLand(tx, id, true);
   ownership(land.owner_agent_id, input.agent_id); version(land.version, input.version); editable(land.active_listing_id);
+  if (land.showcase_hidden) throw new AppError('CONTENT_MODERATED', 409, '此地块展示已被管理员屏蔽，恢复前不能修改展示');
   const showcase = input.showcase?.map(item => ({ ...item, ...(item.title !== undefined ? { title: item.title.trim() } : {}),
     ...(item.type === 'text' ? { text: item.text.trim() } : {}) }));
   await tx.query('UPDATE land_plots SET name=$2,works_url=$3,showcase=COALESCE($4::jsonb,showcase),version=version+1,updated_at=clock_timestamp() WHERE id=$1',
@@ -287,9 +308,115 @@ export async function placeItem(tx: Tx, actor: Actor, requestId: string, id: str
   for (const landId of [...new Set([item.land_id, input.land_id].filter((value): value is string => !!value))].sort()) {
     const land = await loadLand(tx, landId, true);
     ownership(land.owner_agent_id, input.agent_id); editable(land.active_listing_id);
+    if (landId === input.land_id && land.showcase_hidden) throw new AppError('CONTENT_MODERATED', 409, '此地块展示已被管理员屏蔽，恢复前不能摆放物品');
   }
   if (item.land_id === input.land_id) throw new AppError('NO_CHANGE', 409, '物品已在目标位置');
   await tx.query('UPDATE item_instances SET land_id=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1', [id, input.land_id]);
   await audit(tx, actor, 'market.item_placed', 'item', id, requestId, { from_land_id: item.land_id, land_id: input.land_id });
+  return { status: 200, body: { ...await loadItem(tx, id) }, resourceType: 'item', resourceId: id };
+}
+
+// The route locks these owners together with the administrator before locking assets.
+// A subsequent sale changes the asset version, so the command cannot affect a new owner using an old quote.
+export async function assetOwnerIds(tx: Tx, kind: 'lands' | 'items', id: string): Promise<string[]> {
+  const row = kind === 'lands'
+    ? (await tx.query<{ owner_user_id: string | null }>('SELECT owner_user_id FROM land_plots WHERE id=$1', [id])).rows[0]
+    : (await tx.query<{ owner_user_id: string }>('SELECT a.owner_user_id FROM item_instances i JOIN agents a ON a.id=i.owner_agent_id WHERE i.id=$1', [id])).rows[0];
+  if (!row) throw new AppError('NOT_FOUND', 404);
+  return row.owner_user_id ? [row.owner_user_id] : [];
+}
+
+export async function assetTransferOwners(tx: Tx, expectedOwnerAgentId: string | null, targetAgentId: string) {
+  // Lock the owner asserted by the request, then verify the asset still belongs to that Agent.
+  // Looking up only the asset's current owner here could miss a transfer committed before command() starts.
+  const rows = (await tx.query<{ id: string; owner_user_id: string }>('SELECT id,owner_user_id FROM agents WHERE id=ANY($1::uuid[])', [[targetAgentId, ...(expectedOwnerAgentId ? [expectedOwnerAgentId] : [])]])).rows;
+  const target = rows.find(row => row.id === targetAgentId);
+  if (!target) throw new AppError('NOT_FOUND', 404, '目标 Agent 不存在');
+  return rows.map(row => row.owner_user_id);
+}
+
+export async function transferAdminAsset(tx: Tx, actor: Actor, requestId: string, kind: 'lands' | 'items', id: string, input: AdminAssetTransferInput): Promise<CommandResult> {
+  const asset = kind === 'lands' ? await loadLand(tx, id, true, true) : await loadItem(tx, id, true);
+  version(asset.version, input.version);
+  if (asset.owner_agent_id !== input.expected_owner_agent_id) throw new AppError('ASSET_OWNER_CONFLICT', 409, '资产归属已变化，请刷新并重新核对旧归属');
+  if (asset.owner_agent_id === input.target_agent_id) throw new AppError('NO_CHANGE', 409, '目标 Agent 已持有此资产');
+  const target = (await tx.query<{ id: string; owner_user_id: string; status: string; deleted_at: Date | null; user_status: string }>(
+    'SELECT a.id,a.owner_user_id,a.status,a.deleted_at,u.status AS user_status FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.id=$1 FOR UPDATE OF a', [input.target_agent_id])).rows[0];
+  if (!target || target.deleted_at || target.status !== 'active' || target.user_status !== 'active')
+    throw new AppError('ASSET_TARGET_UNAVAILABLE', 409, '目标必须是活跃用户所属、未删除且已启用的 Agent');
+  if (input.mode === 'recover' && target.owner_user_id !== adminId(actor)) throw new AppError('ACCESS_DENIED', 403, '回收只能转入当前管理员所属的托管 Agent');
+  if (input.mode === 'recover' && !asset.owner_agent_id) throw new AppError('NO_CHANGE', 409, '系统未售资产无需回收');
+  let previousContent: Record<string, unknown> = {};
+  if ('code' in asset) {
+    requirePrivateLand(asset);
+    const returnedItems = (await tx.query('SELECT id,owner_agent_id,land_id,version::text FROM item_instances WHERE land_id=$1 ORDER BY id', [id])).rows;
+    const removedModels = (await tx.query('SELECT id,model_id,x,y,rotation,scale,room_id,version::text FROM world_model_placements WHERE land_id=$1 ORDER BY id', [id])).rows;
+    const removedBindings = (await tx.query('SELECT gm.placement_id,gm.game_id FROM arcade_game_machines gm JOIN world_model_placements m ON m.id=gm.placement_id WHERE m.land_id=$1 ORDER BY gm.placement_id', [id])).rows;
+    previousContent = { returned_items: returnedItems, removed_models: removedModels, removed_game_bindings: removedBindings };
+    await cancelAssetListing(tx, actor, requestId, asset.active_listing_id, input.reason);
+    await changeLandOwner(tx, id, target.id, target.owner_user_id);
+  } else {
+    await cancelAssetListing(tx, actor, requestId, asset.active_listing_id, input.reason);
+    if (asset.land_id) {
+      const land = await loadLand(tx, asset.land_id, true);
+      await cancelAssetListing(tx, actor, requestId, land.active_listing_id, input.reason);
+      await tx.query('UPDATE land_plots SET version=version+1,updated_at=clock_timestamp() WHERE id=$1', [land.id]);
+    }
+    await tx.query('UPDATE item_instances SET owner_agent_id=$2,land_id=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1', [id, target.id]);
+  }
+  // An administrative correction/custody transfer does not charge, refund, mint or alter historical trades.
+  await audit(tx, actor, input.mode === 'recover' ? 'admin.asset_recovered' : 'admin.asset_transferred', kind === 'lands' ? 'land' : 'item', id, requestId,
+    { ...input, previous_asset: asset, target_user_id: target.owner_user_id, ...previousContent });
+  return { status: 200, body: { ...(kind === 'lands' ? await loadLand(tx, id) : await loadItem(tx, id)) }, resourceType: kind === 'lands' ? 'land' : 'item', resourceId: id };
+}
+
+export async function adminAssetCatalog(tx: Tx): Promise<AdminAssetCatalog> {
+  const lands = (await tx.query<LandRow>(`${landSelect} ORDER BY l.created_at DESC,l.id`)).rows.map(row => landBody(row, true));
+  const items = (await tx.query<ItemRow & { owner_agent_name: string; owner_github_login: string }>(`SELECT i.*,a.name AS owner_agent_name,u.github_login AS owner_github_login
+    FROM (${itemSelect}) i JOIN agents a ON a.id=i.owner_agent_id JOIN users u ON u.id=a.owner_user_id ORDER BY i.created_at DESC,i.id`)).rows.map(dated);
+  const models = (await tx.query<AdminAssetCatalog['models'][number]>('SELECT id,land_id,model_id,x,y,rotation,scale,room_id,version::text FROM world_model_placements ORDER BY land_id,id')).rows;
+  return { lands, items, models, listings: await listingRows(tx, "ml.status='active'", []) };
+}
+
+export async function moderateLand(tx: Tx, actor: Actor, requestId: string, id: string, input: AdminLandModerationInput): Promise<CommandResult> {
+  const land = await loadLand(tx, id, true);
+  version(land.version, input.version);
+  // Either action changes the offer being quoted. Existing buyers must refresh after an administrator intervenes.
+  await cancelAssetListing(tx, actor, requestId, land.active_listing_id, input.reason);
+  await tx.query(`UPDATE land_plots SET trading_frozen=COALESCE($2,trading_frozen),showcase_hidden=COALESCE($3,showcase_hidden),
+    version=version+1,updated_at=clock_timestamp() WHERE id=$1`, [id, input.trading_frozen ?? null, input.showcase_hidden ?? null]);
+  if (input.showcase_hidden) await tx.query(`UPDATE world_positions p SET room_id=NULL,x=l.x+m.x,y=l.y+m.y+1,updated_at=clock_timestamp()
+    FROM world_model_placements m JOIN land_plots l ON l.id=m.land_id WHERE p.room_id=m.id AND l.id=$1`, [id]);
+  await audit(tx, actor, 'admin.land_moderated', 'land', id, requestId, { ...input,
+    previous_trading_frozen: land.trading_frozen, previous_showcase_hidden: land.showcase_hidden });
+  return { status: 200, body: { ...await loadLand(tx, id) }, resourceType: 'land', resourceId: id };
+}
+
+export async function moderateItem(tx: Tx, actor: Actor, requestId: string, id: string, input: AdminItemModerationInput): Promise<CommandResult> {
+  const item = await loadItem(tx, id, true);
+  version(item.version, input.version);
+  await cancelAssetListing(tx, actor, requestId, item.active_listing_id, input.reason);
+  await tx.query('UPDATE item_instances SET trading_frozen=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1', [id, input.trading_frozen]);
+  await audit(tx, actor, 'admin.item_moderated', 'item', id, requestId, { ...input, previous_trading_frozen: item.trading_frozen });
+  return { status: 200, body: { ...await loadItem(tx, id) }, resourceType: 'item', resourceId: id };
+}
+
+export async function adminCancelListing(tx: Tx, actor: Actor, requestId: string, id: string, input: AdminAssetActionInput): Promise<CommandResult> {
+  const listing = await loadListing(tx, id, true);
+  version(listing.version, input.version);
+  if (listing.status !== 'active') throw new AppError('LISTING_CLOSED', 409, '挂牌已经关闭');
+  await closeListing(tx, actor, requestId, listing, input.reason);
+  return { status: 200, body: { ...await loadListing(tx, id) }, resourceType: 'market_listing', resourceId: id };
+}
+
+export async function returnAdminItem(tx: Tx, actor: Actor, requestId: string, id: string, input: AdminAssetActionInput): Promise<CommandResult> {
+  const item = await loadItem(tx, id, true);
+  version(item.version, input.version);
+  if (!item.land_id) throw new AppError('NO_CHANGE', 409, '物品已在原主库存中');
+  const land = await loadLand(tx, item.land_id, true);
+  await cancelAssetListing(tx, actor, requestId, land.active_listing_id, input.reason);
+  await tx.query('UPDATE item_instances SET land_id=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1', [id]);
+  await tx.query('UPDATE land_plots SET version=version+1,updated_at=clock_timestamp() WHERE id=$1', [land.id]);
+  await audit(tx, actor, 'admin.item_returned', 'item', id, requestId, { ...input, from_land_id: land.id, owner_agent_id: item.owner_agent_id });
   return { status: 200, body: { ...await loadItem(tx, id) }, resourceType: 'item', resourceId: id };
 }

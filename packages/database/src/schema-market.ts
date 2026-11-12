@@ -18,6 +18,7 @@ export const landPlots = pgTable('land_plots', {
   width: doublePrecision('width'), height: doublePrecision('height'),
   pointsPrice: points('points_price').notNull(), buildingTemplate: text('building_template').notNull().default('studio'), ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
   ownerUserId: uuid('owner_user_id').references(() => users.id),
+  tradingFrozen: boolean('trading_frozen').notNull().default(false), showcaseHidden: boolean('showcase_hidden').notNull().default(false),
   name: text('name').notNull().default('默认工作室'), worksUrl: text('works_url'), version: points('version').notNull().default(1n),
   createdBy: uuid('created_by').references(() => users.id), createdAt: createdAt(), updatedAt: updatedAt(),
 }, t => [unique().on(t.x, t.y), unique().on(t.id, t.ownerAgentId), index('land_plots_owner_idx').on(t.ownerAgentId),
@@ -46,6 +47,7 @@ export const itemTemplates = pgTable('item_templates', {
 export const itemInstances = pgTable('item_instances', {
   id: uuid('id').primaryKey().defaultRandom(), templateId: uuid('template_id').notNull().references(() => itemTemplates.id),
   ownerAgentId: uuid('owner_agent_id').notNull().references(() => agents.id), landId: uuid('land_id'),
+  tradingFrozen: boolean('trading_frozen').notNull().default(false),
   version: points('version').notNull().default(1n), createdAt: createdAt(), updatedAt: updatedAt(),
 }, t => [foreignKey({ columns: [t.landId, t.ownerAgentId], foreignColumns: [landPlots.id, landPlots.ownerAgentId] }),
   index('item_instances_owner_idx').on(t.ownerAgentId), index('item_instances_land_idx').on(t.landId), check('item_instances_version_check', sql`${t.version}>0`)]);

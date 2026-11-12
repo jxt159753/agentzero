@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { withTransaction } from '@agentzero/database';
 import {
   BuyMarketAsset, CancelMarketListing, CreateItemTemplate, CreateLandSupply, CreateMarketListing, IdParams,
-  PatchItemTemplate, PatchLandPrice, PatchStudio, PlaceMarketItem, PutMarketSettings,
+  PatchItemTemplate, PatchLandPrice, PatchStudio, PlaceMarketItem, PutMarketSettings, AdminAssetAction, AdminAssetTransfer, AdminItemModeration, AdminLandModeration, WorldModelParams,
+  type AdminAssetActionInput, type AdminAssetTransferInput, type AdminItemModerationInput, type AdminLandModerationInput,
   type BuyMarketAssetInput, type CancelMarketListingInput, type CreateItemTemplateInput, type CreateLandSupplyInput,
   type CreateMarketListingInput, type PatchItemTemplateInput, type PatchLandPriceInput, type PatchStudioInput, type PlaceMarketItemInput, type PutMarketSettingsInput,
 } from '@agentzero/contracts';
@@ -11,13 +12,60 @@ import { command, type ApiContext } from '../../http.js';
 import {
   buyLand, buyListing, buyTemplate, cancelListing, createItemTemplate, createLandSupply, createListing,
   listingOwner, loadLand, loadListing, marketAssets, marketCatalog, patchItemTemplate, patchLandPrice, patchStudio, placeItem, putMarketSettings, readItem,
+  adminAssetCatalog, adminCancelListing, assetOwnerIds, assetTransferOwners, moderateItem, moderateLand, returnAdminItem, transferAdminAsset,
 } from './service.js';
+import { adminDeleteWorldModel } from '../world/models.js';
 
 function represent(request: FastifyRequest, agentId: string) {
   if (request.actor.type === 'user') request.actor = { ...request.actor, representedAgentId: agentId };
 }
 
 export async function registerMarket(app: FastifyInstance, ctx: ApiContext) {
+  const owners = (request: FastifyRequest, kind: 'lands' | 'items', id: string) => withTransaction(ctx.pool, async tx => {
+    await lockActor(tx, request.actor, { admin: true });
+    return assetOwnerIds(tx, kind, id);
+  });
+  app.get('/api/v1/admin/assets', request => withTransaction(ctx.pool, async tx => {
+    await lockActor(tx, request.actor, { admin: true });
+    return adminAssetCatalog(tx);
+  }));
+  for (const kind of ['lands', 'items'] as const) {
+    app.post<{ Params: { id: string }; Body: AdminAssetTransferInput }>(`/api/v1/admin/assets/${kind}/:id/transfer`,
+      { schema: { params: IdParams, body: AdminAssetTransfer } }, async (request, reply) => {
+        const userIds = await withTransaction(ctx.pool, async tx => {
+          await lockActor(tx, request.actor, { admin: true });
+          return assetTransferOwners(tx, request.body.expected_owner_agent_id, request.body.target_agent_id);
+        });
+        return command(ctx, request, reply, { admin: true, userIds }, tx => transferAdminAsset(tx, request.actor, request.id, kind, request.params.id, request.body));
+      });
+  }
+  app.patch<{ Params: { id: string }; Body: AdminLandModerationInput }>('/api/v1/admin/assets/lands/:id',
+    { schema: { params: IdParams, body: AdminLandModeration } }, async (request, reply) => {
+      const userIds = await owners(request, 'lands', request.params.id);
+      return command(ctx, request, reply, { admin: true, userIds }, tx => moderateLand(tx, request.actor, request.id, request.params.id, request.body));
+    });
+  app.patch<{ Params: { id: string }; Body: AdminItemModerationInput }>('/api/v1/admin/assets/items/:id',
+    { schema: { params: IdParams, body: AdminItemModeration } }, async (request, reply) => {
+      const userIds = await owners(request, 'items', request.params.id);
+      return command(ctx, request, reply, { admin: true, userIds }, tx => moderateItem(tx, request.actor, request.id, request.params.id, request.body));
+    });
+  app.post<{ Params: { id: string }; Body: AdminAssetActionInput }>('/api/v1/admin/assets/listings/:id/cancel',
+    { schema: { params: IdParams, body: AdminAssetAction } }, async (request, reply) => {
+      const seller = await withTransaction(ctx.pool, async tx => {
+        await lockActor(tx, request.actor, { admin: true }); return listingOwner(tx, request.params.id);
+      });
+      return command(ctx, request, reply, { admin: true, userIds: [seller.seller_user_id] }, tx => adminCancelListing(tx, request.actor, request.id, request.params.id, request.body));
+    });
+  app.post<{ Params: { id: string }; Body: AdminAssetActionInput }>('/api/v1/admin/assets/items/:id/return',
+    { schema: { params: IdParams, body: AdminAssetAction } }, async (request, reply) => {
+      const userIds = await owners(request, 'items', request.params.id);
+      return command(ctx, request, reply, { admin: true, userIds }, tx => returnAdminItem(tx, request.actor, request.id, request.params.id, request.body));
+    });
+  app.delete<{ Params: { id: string; placementId: string }; Body: AdminAssetActionInput }>('/api/v1/admin/assets/lands/:id/models/:placementId',
+    { schema: { params: WorldModelParams, body: AdminAssetAction } }, async (request, reply) => {
+      const userIds = await owners(request, 'lands', request.params.id);
+      return command(ctx, request, reply, { admin: true, userIds }, tx => adminDeleteWorldModel(tx, request.actor, request.id, request.params.id, request.params.placementId, request.body));
+    });
   for (const [path, admin] of [['/api/v1/market', false], ['/api/v1/admin/market', true]] as const) {
     app.get(path, async request => withTransaction(ctx.pool, async tx => {
       await lockActor(tx, request.actor, { allowPaused: true, admin });

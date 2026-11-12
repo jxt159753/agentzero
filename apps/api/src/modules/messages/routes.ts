@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { withTransaction } from '@agentzero/database';
 import { AddGroupMembers,CreateConversation,CreateGroupConversation,GroupMemberCommand,GroupMemberParams,IdParams,MessageQuery,PageQuery,RenameGroupConversation,SendMessage,SetGroupMemberRole,type AddGroupMembersInput,type CreateConversationInput,type CreateGroupConversationInput,type GroupMemberCommandInput,type RenameGroupConversationInput,type SendMessageInput,type SetGroupMemberRoleInput } from '@agentzero/contracts';
-import { AppError,audit,decodeCursor,lockActor,paginated } from '../../core.js';
+import { AppError,audit,decodeCursor,lockActor } from '../../core.js';
 import { command,type ApiContext } from '../../http.js';
 import { accessParams,appendMessage,conversationAccess,conversationBody,createGroupConversation,inviteGroupMembers,leaveGroupConversation,lockGroup,messagePage,messageUserId,removeGroupMember,renameGroupConversation,requireConversation,requireGroup,requireTaskDiscussion,sendingAgent,setGroupMemberRole } from './service.js';
 
@@ -16,8 +16,13 @@ export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
   app.get<{Querystring:{cursor?:string;limit?:string}}>('/api/v1/conversations',{schema:{querystring:PageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});
     const cursor=decodeCursor(request.query.cursor),limit=Number(request.query.limit??30);
-    const rows=(await tx.query(`SELECT c.* FROM conversations c WHERE ${conversationAccess} AND ($3::timestamptz IS NULL OR (c.created_at,c.id)<($3,$4::uuid)) ORDER BY c.created_at DESC,c.id DESC LIMIT $5`,[...accessParams(request.actor),cursor?.[0]??null,cursor?.[1]??null,limit+1])).rows;
-    const page=paginated(rows,limit);
+    const rows=(await tx.query(`SELECT c.*,latest.id AS last_message_id,
+      to_char(COALESCE(latest.created_at,c.created_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS activity_at
+      FROM conversations c LEFT JOIN LATERAL (SELECT m.id,m.created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY m.cursor DESC LIMIT 1) latest ON true
+      WHERE ${conversationAccess} AND ($3::timestamptz IS NULL OR (COALESCE(latest.created_at,c.created_at),c.id)<($3,$4::uuid))
+      ORDER BY COALESCE(latest.created_at,c.created_at) DESC,c.id DESC LIMIT $5`,[...accessParams(request.actor),cursor?.[0]??null,cursor?.[1]??null,limit+1])).rows;
+    const items=rows.slice(0,limit),last=items.at(-1);
+    const page={items,next_cursor:rows.length>limit?Buffer.from(JSON.stringify([last.activity_at,last.id])).toString('base64url'):null};
     return {...page,items:await Promise.all(page.items.map(row=>conversationBody(tx,row)))};
   }));
   app.post<{Body:CreateConversationInput}>('/api/v1/conversations',{schema:{body:CreateConversation}},async(request,reply)=>{
@@ -98,7 +103,7 @@ export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
       return leaveGroupConversation(tx,request.actor,request.id,await lockGroup(tx,group.id),sender);
     });
   });
-  app.get<{Params:{id:string};Querystring:{after?:string;limit?:string}}>('/api/v1/conversations/:id/messages',{schema:{params:IdParams,querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
+  app.get<{Params:{id:string};Querystring:{after?:string;before?:string;limit?:string}}>('/api/v1/conversations/:id/messages',{schema:{params:IdParams,querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});await requireConversation(tx,request.params.id,request.actor);
     return messagePage(tx,request.actor,request.query,request.params.id);
   }));
@@ -107,10 +112,13 @@ export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
     if(request.actor.type==='user'&&sender) request.actor={...request.actor,representedAgentId:sender};
     return command(ctx,request,reply,{...(sender?{agentId:sender}:{})},async tx=>appendMessage(tx,request.actor,request.id,await requireConversation(tx,request.params.id,request.actor),request.body.body,sender));
   });
-  app.get<{Params:{id:string};Querystring:{after?:string;limit?:string}}>('/api/v1/tasks/:id/messages',{schema:{params:IdParams,querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
+  app.get<{Params:{id:string};Querystring:{after?:string;before?:string;limit?:string}}>('/api/v1/tasks/:id/messages',{schema:{params:IdParams,querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});await requireTaskDiscussion(tx,request.params.id,request.actor);
     const conversation=(await tx.query("SELECT id FROM conversations WHERE task_id=$1 AND kind='task'",[request.params.id])).rows[0];
-    if(!conversation) return {items:[],next_cursor:request.query.after??'0',has_more:false,conversation_id:null};
+    if(!conversation) {
+      if(request.query.after!==undefined&&request.query.before!==undefined||BigInt(request.query.before??request.query.after??'0')>9223372036854775807n) throw new AppError('INVALID_REQUEST',400,'无效消息游标');
+      return {items:[],next_cursor:request.query.before??request.query.after??'0',has_more:false,conversation_id:null};
+    }
     return messagePage(tx,request.actor,request.query,conversation.id);
   }));
   app.post<{Params:{id:string};Body:SendMessageInput}>('/api/v1/tasks/:id/messages',{schema:{params:IdParams,body:SendMessage}},async(request,reply)=>{
@@ -123,7 +131,7 @@ export async function registerMessages(app:FastifyInstance,ctx:ApiContext) {
       return appendMessage(tx,request.actor,request.id,conversation,request.body.body,sender);
     });
   });
-  app.get<{Querystring:{after?:string;limit?:string}}>('/api/v1/messages',{schema:{querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
+  app.get<{Querystring:{after?:string;before?:string;limit?:string}}>('/api/v1/messages',{schema:{querystring:MessageQuery}},async request=>withTransaction(ctx.pool,async tx=>{
     await lockActor(tx,request.actor,{allowPaused:true});return messagePage(tx,request.actor,request.query);
   }));
 }

@@ -5,5 +5,6 @@
 
 https://{$PUBLIC_HOST} {
   tls /certs/current/fullchain.pem /certs/current/privkey.pem
+  encode zstd gzip
   reverse_proxy api:3000
 }

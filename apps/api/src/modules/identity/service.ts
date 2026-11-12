@@ -89,9 +89,9 @@ export async function registerOAuth(app:FastifyInstance,pool:Pool,config:Config,
       }
       const user=(await tx.query(`INSERT INTO users(id,github_user_id,github_login,display_name,avatar_url,status,role)
         VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(github_user_id) DO UPDATE SET github_login=excluded.github_login,display_name=excluded.display_name,avatar_url=excluded.avatar_url,
-        status=CASE WHEN users.status='pending' AND users.role='member' AND excluded.role='admin' THEN 'active' ELSE users.status END,
+        status=CASE WHEN users.status='pending' AND users.role='member' AND excluded.status='active' THEN 'active' ELSE users.status END,
         role=CASE WHEN users.status='pending' AND users.role='member' AND excluded.role='admin' THEN 'admin' ELSE users.role END,
-        updated_at=clock_timestamp() RETURNING id,status,role`,[randomUUID(),identity.id,identity.login,identity.name,identity.avatarUrl,bootstrap?'active':'pending',bootstrap?'admin':'member'])).rows[0];
+        updated_at=clock_timestamp() RETURNING id,status,role`,[randomUUID(),identity.id,identity.login,identity.name,identity.avatarUrl,bootstrap || config.registrationMode === 'public' ? 'active':'pending',bootstrap?'admin':'member'])).rows[0];
       await tx.query('SELECT ledger.open_user_account($1)', [user.id]);
       const sessionId=randomUUID();
       await tx.query("INSERT INTO user_sessions(id,user_id,token_hash,csrf_token_hash,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+interval '7 days')",[sessionId,user.id,tokenHash(session),tokenHash(csrf)]);

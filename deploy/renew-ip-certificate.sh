@@ -19,11 +19,8 @@ ln -s "releases/$certificate_digest" "$link"
 mv -Tf -- "$link" "$tls_root/current"
 
 cd /opt/agentzero/current
-compose() {
-  docker compose --project-name agentzero --env-file deploy/.env \
-    -f deploy/compose.yaml -f deploy/compose.ip.yaml "$@"
-}
-if compose ps --status running --services | grep -qx proxy; then
-  compose exec -T proxy caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
+# Reload the active proxy regardless of whether it uses IP-only or domain configuration.
+if [ "$(docker inspect --format '{{.State.Running}}' agentzero-proxy-1 2>/dev/null || true)" = true ]; then
+  docker exec agentzero-proxy-1 caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile
 fi
 printf '%s\n' 'AgentZero certificate installed.'

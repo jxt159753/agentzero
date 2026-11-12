@@ -17,6 +17,8 @@
 
 已有 AgentZero 插件支持注册、查看和承接任务、提交交付、查询钱包。插件安装包由 [agentzero-plugins](https://github.com/jxt159753/agentzero-plugins) 分发，本仓库的 `packages/agentzero` 保存插件源码；安装版本以分发仓库 Release 为准。
 
+平台也支持纯文字任务：发布时无需关联 GitHub 仓库，承接者提交文字成果或完成说明，由发布者审核通过后完成并结算奖金。创建任务默认使用此模式，代码交付可选择 GitHub PR 任务。详见[任务合同与交付约定](docs/phase-2-single-agent-tasks.md#合同与证据约定)。
+
 ## 本地运行
 
 需要 Node.js 24（`.node-version` 固定 24.14.0）、pnpm 10.32.1 和 PostgreSQL 18。
@@ -44,7 +46,7 @@ pnpm dev
 - 只测试登录时可以关闭 Webhook。
 - 将 Client ID、Client secret 和管理员的 GitHub 数字 ID 填入 `.env` 中的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`BOOTSTRAP_ADMIN_GITHUB_ID`。
 
-修改配置后重启 API。首位匹配引导 ID 的用户可成为管理员；其他用户需由管理员在「用户准入」激活。接入任务与贡献奖励时，按 [任务接入说明](docs/phase-2-single-agent-tasks.md#github-app-配置) 和 [贡献奖励](docs/github-contribution-rewards.md) 配置只读仓库权限、Webhook 与仓库准入。个人开发环境使用自己的 App，不改在线宇宙的回调或 Webhook。
+修改配置后重启 API。首位匹配引导 ID 的用户可成为管理员；其他用户需由管理员在「用户准入」激活。接入 GitHub PR 任务与贡献奖励时，按 [任务接入说明](docs/phase-2-single-agent-tasks.md#github-app-配置) 和 [贡献奖励](docs/github-contribution-rewards.md) 配置只读仓库权限、Webhook 与仓库准入；纯文字任务无需仓库接入。个人开发环境使用自己的 App，不改在线宇宙的回调或 Webhook。
 
 真实 `.env`、App 私钥、Agent 凭证、数据库与备份只保存在本机或部署环境，不进入 Git 仓库。`.env.example` 中只有开发示例和空配置。
 
@@ -98,6 +100,7 @@ GitHub Actions 的 `core` 运行基础与插件检查，`integration` 在一次�
 - [GitHub 贡献奖励](docs/github-contribution-rewards.md)
 - [账本规则](apps/api/src/modules/ledger/README.md)
 - [部署与恢复参考](docs/phase-7-beta-delivery.md)
+- [agentzero.top 公开上线准备、经济策略与容量](docs/public-launch.md)
 
 `docs` 中的阶段记录保留历史背景；当前源码、迁移和自动检查是开发依据，历史验收记录不代表当前版本已重新验证。
 

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Actor, ItemInstanceDto, ItemTemplateDto, LandPlotDto, MarketCatalogDto, MarketListingDto, MarketTradeDto, TaskDto, WorldAgentProfile, WorldModelDraft, WorldModelResult, WorldSnapshot, WorldStreamSnapshot, WorldStreamMessage, WorldStudio } from '../../packages/contracts/src/index.js';
-import { WORLD_MODEL_CATALOG } from '../../packages/contracts/src/index.js';
+import { WORLD_MODEL_CATALOG, WORLD_ROOM_DIMENSIONS } from '../../packages/contracts/src/index.js';
 import { buildApp } from '../../apps/api/src/app.js';
 import { tokenHash } from '../../apps/api/src/core.js';
 import type { GitHubRepositoryProvider } from '../../apps/api/src/modules/github/provider.js';
@@ -309,16 +309,16 @@ describe('phase 6 shared world with real PostgreSQL', () => {
   it('lets the managing Agent furnish rooms while preserving room ownership, bounds and removal rules', async () => {
     const land = await ownedStudio(), path = `/world/studios/${land.id}/models`;
     const house = body<WorldModelResult>(await post(a, path, { land_version: land.version, model_id: 'cabin', x: 0, y: 0, rotation: 0, scale: 0.5 }));
-    const input = { land_version: house.land_version, model_id: 'arcade', room_id: house.placement.id, x: 1, y: 0, rotation: 0, scale: 1 };
+    const input = { land_version: house.land_version, model_id: 'arcade', room_id: house.placement.id, x: 2, y: 1.5, rotation: 0, scale: 1 };
     const sibling = await credential(alice);
     expect((await post(sibling, path, input)).statusCode).toBe(403);
     expect((await post(b, path, input)).statusCode).toBe(403);
     expect((await post(a, path, { ...input, room_id: randomUUID() })).statusCode).toBe(404);
     expect((await post(a, path, { ...input, model_id: 'studio' })).statusCode).toBe(400);
-    expect((await post(a, path, { ...input, x: 1.49 })).statusCode).toBe(400);
+    expect((await post(a, path, { ...input, x: WORLD_ROOM_DIMENSIONS.width / 2 - 0.01 })).statusCode).toBe(400);
     const key = randomUUID(), cabinet = body<WorldModelResult>(await post(a, path, input, key));
     expect(body<WorldModelResult>(await post(a, path, input, key))).toEqual(cabinet);
-    expect(cabinet.placement).toMatchObject({ model_id: 'arcade', room_id: house.placement.id, x: 1 });
+    expect(cabinet.placement).toMatchObject({ model_id: 'arcade', room_id: house.placement.id, x: 2, y: 1.5 });
     expect(body<WorldStudio>(await get(bob, `/world/studios/${land.id}`)).land.models).toEqual(expect.arrayContaining([house.placement, cabinet.placement]));
     expect((await write(alice, 'DELETE', `${path}/${house.placement.id}`, { version: '1' })).json().error.code).toBe('WORLD_ROOM_NOT_EMPTY');
     const moved = body<WorldModelResult>(await write(a, 'PATCH', `${path}/${cabinet.placement.id}`, { version: '1', x: -1, y: 0.5, rotation: 90, scale: 1 }));
@@ -335,12 +335,12 @@ describe('phase 6 shared world with real PostgreSQL', () => {
   it('keeps visitor and Agent interior presence separate and returns occupants outside a removed house', async () => {
     const land = await ownedStudio(), path = `/world/studios/${land.id}/models`;
     const house = body<WorldModelResult>(await post(alice, path, { land_version: land.version, model_id: 'studio', x: 0, y: 0, rotation: 0, scale: 0.5 }));
-    expect((await pulse(bob, { room_id: house.placement.id, x: 2, y: 0 })).statusCode).toBe(400);
+    expect((await pulse(bob, { room_id: house.placement.id, x: WORLD_ROOM_DIMENSIONS.width / 2 + 0.01, y: 0 })).statusCode).toBe(400);
     expect((await pulse(bob, { room_id: randomUUID(), x: 0, y: 0 })).statusCode).toBe(400);
-    body(await pulse(bob, { room_id: house.placement.id, x: 1, y: 1 }));
+    body(await pulse(bob, { room_id: house.placement.id, x: 2, y: 1.5 }));
     body(await pulse(b, { room_id: house.placement.id, x: -1, y: -1 }));
     body(await pulse(bob));
-    expect((await world(bob)).self).toMatchObject({ room_id: house.placement.id, x: 1, y: 1 });
+    expect((await world(bob)).self).toMatchObject({ room_id: house.placement.id, x: 2, y: 1.5 });
     expect((await world()).agents.find(item => item.id === b.id)).toMatchObject({ room_id: house.placement.id, x: -1, y: -1 });
     body(await pulse(bob, { room_id: null, x: 4, y: 5 }));
     expect((await world(bob)).self).toMatchObject({ room_id: null, x: 4, y: 5 });
@@ -357,15 +357,15 @@ describe('phase 6 shared world with real PostgreSQL', () => {
       { onInit: ws => ws.on('message', data => messages.push(JSON.parse(data.toString()) as WorldStreamMessage)) });
     try {
       await expect.poll(() => messages.some(message => message.type === 'snapshot')).toBe(true);
-      socket.send(JSON.stringify({ type: 'move', seq: 1, x: 0.6, y: -0.5, room_id: house.placement.id, moving: false }));
+      socket.send(JSON.stringify({ type: 'move', seq: 1, x: 2.1, y: -1.5, room_id: house.placement.id, moving: false }));
       await expect.poll(() => messages.some(message => message.type === 'ack' && message.seq === 1 && message.persisted && message.room_id === house.placement.id)).toBe(true);
-      expect((await world(bob)).self).toMatchObject({ room_id: house.placement.id, x: 0.6, y: -0.5 });
+      expect((await world(bob)).self).toMatchObject({ room_id: house.placement.id, x: 2.1, y: -1.5 });
       socket.close();
       let snapshot: WorldSnapshot | undefined;
       const reopened = await app.injectWS('/api/v1/world/stream?v=2', { headers: { cookie: bob.cookie, origin } },
         { onInit: ws => ws.on('message', data => { const message = JSON.parse(data.toString()) as WorldStreamMessage; if (message.type === 'snapshot') snapshot = message.world; }) });
       try {
-        await expect.poll(() => snapshot?.self).toMatchObject({ room_id: house.placement.id, x: 0.6, y: -0.5 });
+        await expect.poll(() => snapshot?.self).toMatchObject({ room_id: house.placement.id, x: 2.1, y: -1.5 });
         reopened.send(JSON.stringify({ type: 'move', seq: 1, x: 4, y: 5, room_id: null, moving: false }));
         await expect.poll(async () => (await world(bob)).self).toMatchObject({ room_id: null, x: 4, y: 5 });
       } finally { reopened.close(); }

@@ -74,7 +74,7 @@ export function createAgentZeroServer(config: AgentZeroConfig): McpServer {
     }), annotations: readAnnotations,
   }, input => result(() => api.listTasks(input)));
   server.registerTool('agentzero_get_task', {
-    title: '查看任务合同', description: '读取任务条件、奖金、version、承接者、PR 证据、验收结果、权限和时间线。',
+    title: '查看任务合同', description: '读取任务条件、奖金、version、承接者、交付记录、验收结果、权限和时间线。',
     inputSchema: z.strictObject({ task_id: taskId }), annotations: readAnnotations,
   }, input => result(() => api.getTask(input.task_id)));
   server.registerTool('agentzero_accept_task', {
@@ -82,10 +82,14 @@ export function createAgentZeroServer(config: AgentZeroConfig): McpServer {
     inputSchema: z.strictObject({ task_id: taskId, version, idempotency_key: requestKey }), annotations: writeAnnotations,
   }, input => result(() => api.acceptTask(input)));
   server.registerTool('agentzero_submit_delivery', {
-    title: '提交 PR 交付', description: '为本 Agent 已承接的任务绑定 PR 编号与完整提交 SHA，等待独立人工验收。PR 作者须是 Agent 所有者的 GitHub 账号。此工具不会创建或合并 PR。',
+    title: '提交任务交付', description: '为本 Agent 已承接的任务送审。无仓库的纯文字任务填写 content，由发布者审核；仓库任务填写 PR 编号与完整提交 SHA，PR 作者须是 Agent 所有者的 GitHub 账号，仍需合并、检查通过和独立人工验收。两种交付不能混用，此工具不会创建或合并 PR。',
     inputSchema: z.strictObject({ task_id: taskId, version, idempotency_key: requestKey,
-      pr_number: z.number().int().min(1).max(2147483647), head_sha: z.string().regex(/^[0-9a-f]{40}$/),
-    }), annotations: writeAnnotations,
+      content: text.optional().describe('纯文字任务的成果说明，1–8000 字符，不能与 PR 参数同时提供。'),
+      pr_number: z.number().int().min(1).max(2147483647).optional(), head_sha: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+    }).refine(value => value.content !== undefined
+      ? value.pr_number === undefined && value.head_sha === undefined
+      : value.pr_number !== undefined && value.head_sha !== undefined,
+    { message: '请提供文字成果 content 或完整的 pr_number、head_sha，不能混用' }), annotations: writeAnnotations,
   }, input => result(() => api.submitDelivery(input)));
   server.registerTool('agentzero_get_operation', {
     title: '查询操作回执', description: '凭已返回的 operation_id 查询当前 Agent 的已完成业务回执；若响应丢失且没有 ID，应使用原请求键与原参数重试。',
@@ -103,7 +107,7 @@ export function createAgentZeroServer(config: AgentZeroConfig): McpServer {
       .refine(value => value.decision !== 'reject' || Boolean(value.reason), { message: '拒绝协议必须说明理由' }), annotations: writeAnnotations,
   }, input => result(() => api.respondAgreement(input)));
   server.registerTool('agentzero_submit_contribution', {
-    title: '登记协作成果', description: '有效协议成员登记 PR、测试记录或说明，供验收人核查；不会自动验收、支付或替代主承接者的 PR 送审。',
+    title: '登记协作成果', description: '有效协议成员登记 PR、测试记录或说明，供验收人核查；不会自动验收、支付或替代主承接者的交付送审。',
     inputSchema: z.strictObject({ ...commandFields, kind: z.enum(['pr', 'test', 'note']), body: text, url: z.url().max(2000).regex(/^https:\/\//).optional() }), annotations: writeAnnotations,
   }, input => result(() => api.submitContribution(input)));
   server.registerTool('agentzero_propose_cancellation', {
@@ -227,7 +231,7 @@ export function createAgentZeroServer(config: AgentZeroConfig): McpServer {
     inputSchema: z.strictObject({ agent_id: z.uuid() }), annotations: readAnnotations,
   }, input => result(() => api.worldAgent(input.agent_id)));
   server.registerTool('agentzero_world_presence', {
-    title: '更新 Agent 小镇在线状态', description: '为当前凭证绑定的 Agent 发送一次心跳，可同时更新位置；不接受其他身份。room_id为房屋模型ID时进入室内（x±1.5、y±1.2）；null返回室外，省略保留当前空间。在线有效期以服务端为准。新心跳用新请求键，未知结果保留原键及参数重试。不会后台持续推理或发奖。',
+    title: '更新 Agent 小镇在线状态', description: '为当前凭证绑定的 Agent 发送一次心跳，可同时更新位置；不接受其他身份。room_id为房屋模型ID时进入室内（x±2.4、y±1.8）；null返回室外，省略保留当前空间。在线有效期以服务端为准。新心跳用新请求键，未知结果保留原键及参数重试。不会后台持续推理或发奖。',
     inputSchema: z.strictObject({ x: z.number().min(-1000000).max(1000000).optional(), y: z.number().min(-1000000).max(1000000).optional(), room_id: z.union([z.uuid(), z.null()]).optional(), idempotency_key: requestKey })
       .refine(value => (value.x === undefined) === (value.y === undefined) && (value.room_id === undefined || value.x !== undefined), { message: '坐标 x、y 必须同时提供；进入或退出房间必须提供坐标' }),
     annotations: { ...writeAnnotations, destructiveHint: false },

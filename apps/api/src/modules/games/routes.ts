@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { BindGameMachine, CreateGame, GameEmpty, GameFunds, GameListQuery, IdParams, PatchGame, SettleGameSession, StartGameSession, SubmitGameScore,
-  type CreateGameInput, type PatchGameInput, type SettleGameSessionInput, type SubmitGameScoreInput } from '@agentzero/contracts';
+import { AdminGameModeration, BindGameMachine, CreateGame, GameEmpty, GameFunds, GameListQuery, IdParams, PatchGame, SettleGameSession, StartGameSession, SubmitGameScore,
+  type AdminGameModerationInput, type CreateGameInput, type PatchGameInput, type SettleGameSessionInput, type SubmitGameScoreInput } from '@agentzero/contracts';
 import { withTransaction } from '@agentzero/database';
 import { lockActor } from '../../core.js';
 import { command, type ApiContext } from '../../http.js';
-import { bindMachine, createGame, fundGame, getGame, getGameContent, getMachine, getSession, listGames, listSessions, patchGame, refundSession, settleSession, startSession, submitScore, withdrawGame } from './service.js';
+import { adminGames, bindMachine, createGame, fundGame, getGameContent, getMachine, getSession, listGames, listSessions, moderateGame, patchGame, readGame, refundSession, settleSession, startSession, submitScore, withdrawGame } from './service.js';
 
 export async function registerGameContent(app: FastifyInstance, ctx: ApiContext) {
   app.get<{ Params: { id: string; '*': string } }>('/game-content/:id/*', { schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }), '*': Type.String({ maxLength: 200 }) }) } }, async (request, reply) => {
@@ -18,13 +18,20 @@ export async function registerGameContent(app: FastifyInstance, ctx: ApiContext)
 }
 
 export async function registerGames(app: FastifyInstance, ctx: ApiContext) {
+  app.get('/api/v1/admin/assets/games', request => withTransaction(ctx.pool, async tx => {
+    await lockActor(tx, request.actor, { admin: true }); return adminGames(tx);
+  }));
+  app.patch<{ Params: { id: string }; Body: AdminGameModerationInput }>('/api/v1/admin/assets/games/:id',
+    { schema: { params: IdParams, body: AdminGameModeration } }, (request, reply) =>
+      command(ctx, request, reply, { admin: true }, tx => moderateGame(tx, request.actor, request.id, request.params.id, request.body)));
   app.get<{ Querystring: { mine?: string } }>('/api/v1/games', { schema: { querystring: GameListQuery } }, request => withTransaction(ctx.pool, async tx => {
     await lockActor(tx, request.actor, { allowPaused: true }); return listGames(tx, request.actor, request.query.mine === 'true');
   }));
   app.post<{ Body: CreateGameInput }>('/api/v1/games', { bodyLimit: 3 * 1024 * 1024, schema: { body: CreateGame } }, (request, reply) =>
     command(ctx, request, reply, { agentId: request.body.agent_id }, tx => createGame(tx, request.actor, request.id, request.body)));
   app.get<{ Params: { id: string } }>('/api/v1/games/:id', { schema: { params: IdParams } }, request => withTransaction(ctx.pool, async tx => {
-    await lockActor(tx, request.actor, { allowPaused: true }); return getGame(tx, request.params.id);
+    const { user } = await lockActor(tx, request.actor, { allowPaused: true });
+    return readGame(tx, request.actor, request.params.id, request.actor.type === 'user' && user?.role === 'admin');
   }));
   app.patch<{ Params: { id: string }; Body: PatchGameInput }>('/api/v1/games/:id', { bodyLimit: 3 * 1024 * 1024, schema: { params: IdParams, body: PatchGame } }, (request, reply) =>
     command(ctx, request, reply, {}, tx => patchGame(tx, request.actor, request.id, request.params.id, request.body)));

@@ -6,7 +6,7 @@ import { buildApp } from '../../apps/api/src/app.js';
 import { tokenHash } from '../../apps/api/src/core.js';
 import { processGameTimeouts } from '../../apps/api/src/modules/games/jobs.js';
 import { reconcile } from '../../apps/api/src/modules/ledger/service.js';
-import { agent, fund, identity, resetLedgerTestData, testPools } from './ledger-fixtures.js';
+import { agent, fund, fundUser, identity, resetLedgerTestData, testPools } from './ledger-fixtures.js';
 
 const pools = testPools(), origin = 'http://localhost:5173';
 type UserActor = Extract<Actor, { type: 'user' }>;
@@ -96,6 +96,7 @@ beforeEach(async () => {
   administrator = await session('admin'); author = await session(); player = await session(); other = await session();
   authorAgent = await credential(author);
   await fund(pools.runtime, administrator.actor, authorAgent.id, '100');
+  for (const user of [administrator, author, player, other]) await fundUser(pools.runtime, administrator.actor, user.actor.userId, '1000');
 });
 afterAll(async () => { await app.close(); await pools.runtime.end(); await pools.migration.end(); });
 
@@ -109,7 +110,7 @@ describe('games paid directly from personal wallets', () => {
     expect(body<GameSessionDto>(started[1]!).id).toBe(round.id);
     expect(round).toMatchObject({ player_agent_id: null, player_user_id: who.actor.userId, status: 'playing', entry_fee: '5' });
     expect(await userWallet(who)).toEqual({ USER_AVAILABLE: '995', USER_RESERVED: '5' });
-    expect(body(await get(who, '/wallet'))).toMatchObject({ available: '995', reserved: '5', initial_grant: '1000' });
+    expect(body(await get(who, '/wallet'))).toMatchObject({ available: '995', reserved: '5', initial_grant: '0' });
     expect((await pools.runtime.query(`SELECT h.payer_agent_id,h.payer_user_id FROM credit_holds h
       JOIN arcade_game_sessions s ON s.fee_hold_id=h.id WHERE s.id=$1`, [round.id])).rows[0]).toEqual({ payer_agent_id: null, payer_user_id: who.actor.userId });
     const history = body<{ items: { id: string; kind: string; entries: { bucket: string; amount: string }[] }[] }>(await get(who, '/wallet/transactions?limit=1'));
@@ -129,7 +130,7 @@ describe('games paid directly from personal wallets', () => {
     expect(body<GameDto>(await get(who, `/games/${value.id}`))).toMatchObject({ pool_balance: '53', pool_committed: '0' });
     await pools.runtime.query('SELECT ledger.open_user_account($1)', [who.actor.userId]);
     expect(await userWallet(who)).toEqual({ USER_AVAILABLE: '1002', USER_RESERVED: '0' });
-    expect((await pools.runtime.query('SELECT count(*)::int n FROM journal_transactions WHERE business_key=$1', [`initial-funds:user:${who.actor.userId}`])).rows[0].n).toBe(1);
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM journal_transactions WHERE business_key=$1', [`initial-funds:user:${who.actor.userId}`])).rows[0].n).toBe(0);
     await expectConserved(value.id);
   });
 

@@ -101,7 +101,7 @@ export async function registerAgentRegistrationApproval(app: FastifyInstance, ct
       verifyBrowser(row, input.verification_code);
       if (row.owner_user_id && row.owner_user_id !== actor.userId) throw new AppError('ACCESS_DENIED', 403);
       if (!row.approved_at) {
-        const agentId = input.agent_id ?? (await createAgent(tx, actor, input.name ?? row.name, request.id)).id as string;
+        const agentId = input.agent_id ?? (await createAgent(tx, actor, input.name ?? row.name, request.id, ctx.config.maxAgentsPerUser)).id as string;
         await tx.query('INSERT INTO agent_keys(id,agent_id,label,secret_hash) VALUES($1,$2,$3,$4)', [row.id, agentId, row.client === 'codex' ? 'Codex' : 'DSH', row.credential_hash]);
         const approved = (await tx.query<Registration>('UPDATE agent_registrations SET owner_user_id=$2,agent_id=$3,approved_at=clock_timestamp() WHERE id=$1 RETURNING *', [row.id, actor.userId, agentId])).rows[0]!;
         await audit(tx, { ...actor, representedAgentId: agentId }, 'key.created', 'key', row.id, request.id, { label: row.client === 'codex' ? 'Codex' : 'DSH' });

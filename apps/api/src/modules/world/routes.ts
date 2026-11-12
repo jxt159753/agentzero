@@ -9,7 +9,7 @@ import { WorldStream } from './stream.js';
 import { addWorldModel, deleteWorldModel, patchWorldModel } from './models.js';
 
 export async function registerWorld(app: FastifyInstance, ctx: ApiContext) {
-  const stream = new WorldStream(ctx.pool);
+  const stream = new WorldStream(ctx.pool, { total: ctx.config.worldMaxConnections ?? 50, perUser: ctx.config.worldMaxConnectionsPerUser ?? 3 });
   app.addHook('onClose', () => stream.close());
   app.get('/api/v1/world', async request => withTransaction(ctx.pool, async tx => {
     await lockActor(tx, request.actor, { allowPaused: true });

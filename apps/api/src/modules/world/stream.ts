@@ -45,12 +45,21 @@ export class WorldStream {
   private connectionRevision = 0;
   private projectionRevision = 0;
 
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool, private limits = { total: 50, perUser: 3 }) {}
 
   connect(socket: WebSocket, actor: Actor, v2: boolean) {
     const subject = worldSubject(actor), now = Date.now();
+    const key = `${subject.kind}:${subject.id}`;
+    // One connection per identity also bounds legacy readers; reconnects can replace their own slot.
+    const replaced = [...this.peers].filter(peer => peer.key === key);
+    const remaining = [...this.peers].filter(peer => peer.key !== key);
+    if (this.stopped || remaining.length >= this.limits.total) { socket.close(1013, 'WORLD_CAPACITY_REACHED'); return; }
+    if (remaining.filter(peer => worldSubject(peer.actor).userId === subject.userId).length >= this.limits.perUser) {
+      socket.close(1008, 'WORLD_USER_CONNECTION_LIMIT'); return;
+    }
+    for (const prior of replaced) this.fail(prior, new AppError('ACCESS_DENIED', 403, 'World opened in another connection'));
     const peer: Peer = { id: randomUUID(), actor, socket, v2, ready: false, closed: false,
-      key: `${subject.kind}:${subject.id}`, kind: subject.kind, subjectId: subject.id,
+      key, kind: subject.kind, subjectId: subject.id,
       x: 0, y: 0, roomId: null, version: '', expires: 0, sequence: -1, savedSequence: -1,
       moving: false, dirty: false, lastHeartbeat: now, lastCheckpoint: now, lastPing: 0,
       windowStart: now, messageCount: 0 };

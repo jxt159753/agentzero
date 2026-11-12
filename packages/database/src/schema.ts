@@ -76,7 +76,7 @@ export const journalTransactions = pgTable('journal_transactions', {
   spendPoints: points('spend_points').notNull().default(0n), businessDate: date('business_date').notNull(),
   correctionOf: uuid('correction_of').references((): AnyPgColumn => journalTransactions.id), reason: text('reason').notNull(), createdAt: createdAt(),
 }, (t) => [index('journal_payer_date_idx').on(t.payerAgentId, t.businessDate), index('journal_created_idx').on(t.createdAt, t.id),
-  check('journal_transactions_kind_check', sql`${t.kind} IN ('ISSUE', 'INITIAL_GRANT', 'TRANSFER', 'RESERVE', 'ADJUST_HOLD', 'FINALIZE_HOLD', 'PAY', 'REFUND')`),
+  check('journal_transactions_kind_check', sql`${t.kind} IN ('ISSUE', 'INITIAL_GRANT', 'TRANSFER', 'RESERVE', 'ADJUST_HOLD', 'FINALIZE_HOLD', 'PAY', 'REFUND', 'RECYCLE', 'ADMIN_ADJUST')`),
   check('journal_transactions_spend_points_check', sql`${t.spendPoints} >= 0`),
   check('journal_transactions_reason_check', sql`length(btrim(${t.reason})) > 0`),
   check('journal_transactions_check', sql`(${t.actorType} = 'user' AND ${t.actorUserId} IS NOT NULL AND ${t.actorAgentId} IS NULL AND ${t.credentialId} IS NULL)

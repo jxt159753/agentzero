@@ -1,0 +1,3 @@
+# These migrations have already been applied with CRLF bytes; preserve their checksums.
+packages/database/migrations/0031_public_economy.sql -text
+packages/database/migrations/0032_admin_wallet_adjustments.sql -text

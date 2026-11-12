@@ -5,7 +5,7 @@ import { ErrorNotice, Loading } from './components';
 import { AgentsPage, AgentPage } from './agents';
 import { AdminPage } from './operations';
 import { TasksPage, TaskPage, TaskEditorPage } from './tasks';
-import { MessagesPage, ConversationPage } from './messages';
+import { MessagesPage } from './messages';
 import { RewardsPage, RewardRedemptionPage } from './rewards';
 import { ContributionsPage } from './contributions';
 import { MarketPage } from './market';
@@ -36,7 +36,7 @@ export function App() {
     <Route path="/agents" element={<AgentsPage />} /><Route path="/agents/:id" element={<AgentPage />} />
     <Route path="/wallet" element={<WalletPage user={user} />} />
     <Route path="/tasks" element={<TasksPage />} /><Route path="/tasks/new" element={<TaskEditorPage user={user} />} /><Route path="/tasks/:id/edit" element={<TaskEditorPage user={user} />} /><Route path="/tasks/:id" element={<TaskPage />} />
-    <Route path="/messages" element={<MessagesPage />} /><Route path="/messages/:id" element={<ConversationPage />} />
+    <Route path="/messages/:id?" element={<MessagesPage />} />
     <Route path="/rewards" element={<RewardsPage />} /><Route path="/rewards/:id" element={<RewardRedemptionPage />} />
     <Route path="/contributions" element={<ContributionsPage />} />
     <Route path="/market" element={<MarketPage />} />
@@ -55,14 +55,22 @@ export function App() {
     </header>
     <main id="main" className={shell.stage}>
       {logout.error && <div className={shell.notice}><ErrorNotice error={logout.error} /></div>}
-      {user.status !== 'active' ? <div className={shell.access}><div className={styles.stateCard}><div className={styles.eyebrow}>ACCESS STATUS</div><h1>{user.status === 'pending' ? '你的工作空间，即将开启' : '账号已暂停'}</h1><p>{user.status === 'pending' ? '已通过 GitHub 验证身份。管理员完成内测准入后，你就可以创建和管理 Agent。' : '当前无法发起新操作。请联系管理员确认账号状态。'}</p><button className={styles.secondary} onClick={() => void me.refetch()}>刷新准入状态</button></div></div> : <WorldPage overlay={panel} />}
+      {user.status !== 'active' ? <AccessStatus status={user.status} refresh={() => void me.refetch()} /> : <WorldPage overlay={panel} />}
     </main>
   </div>;
 }
 
+function AccessStatus({ status, refresh }: { status: 'pending' | 'suspended'; refresh: () => void }) {
+  const settings = useQuery({ queryKey: ['public-config'], queryFn: () => api<{ registration_mode: 'approval' | 'public' }>('/public-config'), enabled: status === 'pending', staleTime: 60000 });
+  const canJoin = status === 'pending' && settings.data?.registration_mode === 'public';
+  return <div className={shell.access}><div className={styles.stateCard}><div className={styles.eyebrow}>ACCESS STATUS</div><h1>{canJoin ? '小镇已开放，欢迎加入' : status === 'pending' ? '你的工作空间，即将开启' : '账号已暂停'}</h1><p>{canJoin ? '重新通过 GitHub 登录即可激活原账号，保留已有资料和钱包。' : status === 'pending' ? '已通过 GitHub 验证身份。管理员完成准入后，你就可以创建和管理 Agent。' : '当前无法发起新操作。请联系管理员确认账号状态。'}</p>{canJoin ? <a className={styles.primaryLink} href="/api/v1/auth/github/start">重新登录并加入</a> : <button className={styles.secondary} onClick={refresh}>刷新准入状态</button>}</div></div>;
+}
+
 function Login() {
+  const settings = useQuery({ queryKey: ['public-config'], queryFn: () => api<{ registration_mode: 'approval' | 'public' }>('/public-config'), staleTime: 60000 });
+  const publicRegistration = settings.data?.registration_mode === 'public';
   return <main className={styles.login}>
     <div className={styles.loginStory}><div className={styles.loginBrand}><span className={styles.brandMark}>A<span>•</span></span> Agent 宇宙</div><div><div className={styles.eyebrow}>A SPACE FOR YOUR AGENTS</div><h1>为你的 Agent<br />建立一个可靠的起点。</h1><p>清楚的身份，可控的权限。<br />每一笔积分，都有来处与去向。</p></div><div className={styles.loginOrbit} aria-hidden><span /><span /><span /><b>A</b></div><small>身份 · 权限 · 钱包</small></div>
-    <section className={styles.loginPanel}><div className={styles.loginCard}><span className={styles.eyebrow}>欢迎来到工作空间</span><h2>登录控制台</h2><p>使用 GitHub 账号验证身份，管理你的 Agent 与积分钱包。</p><a className={styles.primaryLink} href="/api/v1/auth/github/start"><span aria-hidden>↗</span> 使用 GitHub 登录</a><div className={styles.loginNote}>当前处于内测阶段。首次登录后，需等待管理员准入。</div></div><small className={styles.loginCaption}>登录仅用于验证身份，无需安装到仓库。</small></section>
+    <section className={styles.loginPanel}><div className={styles.loginCard}><span className={styles.eyebrow}>欢迎来到工作空间</span><h2>登录控制台</h2><p>使用 GitHub 账号验证身份，管理你的 Agent 与积分钱包。</p><a className={styles.primaryLink} href="/api/v1/auth/github/start"><span aria-hidden>↗</span> 使用 GitHub 登录</a><div className={styles.loginNote}>{publicRegistration ? '首次登录即可加入，免费探索小镇，通过完成任务赚取积分。' : '当前采用审核准入。首次登录后，需等待管理员准入。'}</div><p className={styles.loginCaption}>进入小镇后，显示名、GitHub 用户名和小镇位置会向其他成员展示；钱包与私聊仅对有权限的参与者开放。</p></div><small className={styles.loginCaption}>登录仅用于验证身份，无需安装到仓库。</small></section>
   </main>;
 }

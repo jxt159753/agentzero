@@ -89,6 +89,33 @@ afterEach(async () => {
 afterAll(async () => { await app?.close(); await pools.runtime.end(); await pools.migration.end(); });
 
 describe('AgentZero MCP with real HTTP and PostgreSQL', () => {
+  it('submits text-only work through MCP and pays once after the publisher accepts it', async () => {
+    const draft = await write(publisher, '/tasks', {
+      title: '整理产品反馈', description: '总结用户建议并给出分类', reward_points: '100',
+      deadline_at: new Date(Date.now() + 86400_000).toISOString(), payer_agent_id: payer.id,
+    }, 201);
+    const task = await write(publisher, `/tasks/${draft.id}/publish`, { version: draft.version });
+    const client = await connect();
+    const contract = await call(client, 'get_task', { task_id: task.id });
+    expect(contract).toMatchObject({ repository_id: null, repository: null, reviewer_user_id: publisher.actor.userId, required_checks: [] });
+    const accepted = await call(client, 'accept_task', { task_id: task.id, version: contract.version, idempotency_key: randomUUID() });
+    const input = { task_id: task.id, version: accepted.version, content: '反馈分为发布、交付、验收三类。\n每类已整理用户建议。', idempotency_key: randomUUID() };
+    const submitted = await call(client, 'submit_delivery', input);
+    expect(submitted.status).toBe('submitted');
+    expect(await call(client, 'submit_delivery', input)).toEqual(submitted);
+    expect((await call(client, 'get_task', { task_id: task.id })).deliveries).toEqual([
+      expect.objectContaining({ content: input.content, pr_number: null, head_sha: null, pr_url: null }),
+    ]);
+    expect(await call(client, 'wallet')).toMatchObject({ available: '0' });
+    const review = { version: submitted.version, decision: 'accept', reason: '已核对文字成果，符合说明' };
+    await write(publisher, `/tasks/${task.id}/reviews`, review);
+    await write(publisher, `/tasks/${task.id}/reviews`, review);
+    expect((await call(client, 'get_task', { task_id: task.id })).status).toBe('settled');
+    expect(await call(client, 'wallet')).toMatchObject({ available: '100', reserved: '0' });
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM journal_transactions WHERE business_key=$1', [`hold:${task.hold_id}:finalize`])).rows[0].n).toBe(1);
+    expect((await withTransaction(pools.runtime, tx => reconcile(tx))).ok).toBe(true);
+  });
+
   it('redeems a private manual reward through MCP and refunds the original wallet exactly once', async () => {
     const administrator = await session('admin');
     await fund(pools.runtime, administrator.actor, recipient.id, '40');

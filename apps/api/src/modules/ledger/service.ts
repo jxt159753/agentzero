@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor, WalletReferenceInput } from '@agentzero/contracts';
+import type { Actor, AdminWalletAdjustmentInput, EconomySnapshot, WalletReferenceInput } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError, audit, hash } from '../../core.js';
 
@@ -204,6 +204,76 @@ export async function issue(tx: Tx, ctx: LedgerContext, input: { businessKey: st
   }, { amount: input.amount, period });
   if (result.created) await tx.query('UPDATE public.credit_issuance_periods SET issued_points=issued_points+$2::bigint,updated_at=clock_timestamp() WHERE period=$1', [period, input.amount]);
   return result;
+}
+
+/** Spendable user/Agent money is separate from operator reserves and recovered currency. */
+export async function economySnapshot(tx: Tx): Promise<EconomySnapshot> {
+  return (await tx.query<EconomySnapshot>(`WITH balances AS (
+    SELECT COALESCE(sum(balance::numeric) FILTER(WHERE bucket IN ('USER_AVAILABLE','AVAILABLE')),0) AS available,
+      COALESCE(sum(balance::numeric) FILTER(WHERE bucket IN ('USER_RESERVED','RESERVED')),0) AS reserved,
+      COALESCE(sum(balance::numeric) FILTER(WHERE bucket='REWARD_POOL'),0) AS reward_pool,
+      COALESCE(sum(balance::numeric) FILTER(WHERE bucket='REWARD_RESERVED'),0) AS reward_reserved,
+      COALESCE(sum(balance::numeric) FILTER(WHERE bucket='RECOVERY'),0) AS recovery,
+      COALESCE(sum(balance::numeric) FILTER(WHERE bucket='ISSUANCE_CONTROL'),0) AS issued FROM public.ledger_accounts
+    ), refunds AS (
+      SELECT COALESCE(sum(points_cost::numeric),0) AS reserve FROM public.reward_redemptions WHERE status IN ('pending','processing')
+    ) SELECT available::text AS user_available_points,reserved::text AS user_reserved_points,
+      reward_pool::text AS reward_pool_points,reward_reserved::text AS reward_reserved_points,
+      recovery::text AS recovery_points,reserve::text AS refund_reserve_points,
+      GREATEST(recovery-reserve,0)::text AS recyclable_points,issued::text AS total_issued_points,
+      (SELECT COALESCE(sum(e.amount::numeric),0)::text FROM public.journal_transactions j
+        JOIN public.journal_entries e ON e.transaction_id=j.id WHERE j.kind='RECYCLE' AND e.side='debit') AS recycled_points
+      FROM balances CROSS JOIN refunds`)).rows[0]!;
+}
+
+/** Release only uncommitted recovery funds; pending reward claims remain fully refundable. */
+export async function recycle(tx: Tx, ctx: LedgerContext, input: { businessKey: string; amount: string; reason: string }): Promise<Result> {
+  await requireAdmin(tx, ctx.actor);
+  validateKey(input.businessKey); validateReason(input.reason);
+  points(input.amount, true);
+  const command = { kind: 'RECYCLE', ...input };
+  const previous = await replay(tx, input.businessKey, command);
+  if (previous) return previous;
+  // The privileged journal function checks refund reserves after taking its
+  // canonical account locks. The runtime role cannot lock or update balances.
+  return post(tx, ctx, {
+    kind: 'RECYCLE', key: input.businessKey, command, date: await currentDate(tx), reason: input.reason,
+    entries: [
+      { account_id: await systemAccount(tx, 'RECOVERY'), side: 'credit', amount: input.amount },
+      { account_id: await systemAccount(tx, 'REWARD_POOL'), side: 'debit', amount: input.amount },
+    ],
+  }, { amount: input.amount });
+}
+
+/** Caller locks the administrator and target owner together before any Agent/account lock. */
+export async function adminAdjustWallet(tx: Tx, ctx: LedgerContext, input: Omit<AdminWalletAdjustmentInput, 'business_id'> & {
+  businessKey: string; ownerUserId: string;
+}): Promise<Result> {
+  await requireAdmin(tx, ctx.actor);
+  validateKey(input.businessKey); validateReason(input.reason); points(input.amount, true);
+  const command = { kind: 'ADMIN_ADJUST', ...input };
+  const previous = await replay(tx, input.businessKey, command);
+  if (previous) return previous;
+  if (!(await tx.query('SELECT id FROM public.users WHERE id=$1', [input.ownerUserId])).rowCount) throw new AppError('NOT_FOUND', 404);
+  if (input.wallet.type === 'agent') {
+    const agent = (await tx.query<{ owner_user_id: string; deleted_at: Date | null }>(
+      'SELECT owner_user_id,deleted_at FROM public.agents WHERE id=$1 FOR UPDATE', [input.wallet.id],
+    )).rows[0];
+    if (!agent || agent.owner_user_id !== input.ownerUserId) throw new AppError('NOT_FOUND', 404);
+    if (agent.deleted_at) throw new AppError('AGENT_DELETED', 410);
+  } else if (input.wallet.id !== input.ownerUserId) throw new AppError('ACCESS_DENIED', 403);
+  const target = (await accounts(tx, input.wallet.type === 'agent' ? input.wallet.id : null,
+    input.wallet.type === 'user' ? input.wallet.id : null)).available;
+  const adding = input.direction === 'add';
+  // Administrators may correct suspended/paused wallets. These are administrative
+  // adjustments, not autonomous Agent spending, and never change held balances.
+  return post(tx, ctx, {
+    kind: 'ADMIN_ADJUST', key: input.businessKey, command, date: await currentDate(tx), reason: input.reason,
+    entries: [
+      { account_id: target, side: adding ? 'debit' : 'credit', amount: input.amount },
+      { account_id: await systemAccount(tx, adding ? 'REWARD_POOL' : 'RECOVERY'), side: adding ? 'credit' : 'debit', amount: input.amount },
+    ],
+  }, { wallet: input.wallet, owner_user_id: input.ownerUserId, direction: input.direction, amount: input.amount, reason: input.reason });
 }
 
 export async function reserve(tx: Tx, ctx: LedgerContext, input: { businessRef: string; payerAgentId: string | null; payerUserId?: string; amount: string; permission: Permission; reason: string }): Promise<Result> {

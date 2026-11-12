@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCENE_BOUNDS, FIRST_PERSON_RUN_SPEED, FIRST_PERSON_WALK_SPEED, JUMP_DURATION, MovementOutbox, WALK_SPEED, applyWorldDelta, houseEntrance, interpolatePoint, moveTowards, nearbyArcade, nearbyShowcaseLand, sampleJumpHeight, sceneBounds, walk } from '../../apps/web/src/world-scene.js';
 import { WORLD_BOUNDS, WORLD_PLACES, WORLD_PUBLIC_AREAS, type WorldLand, type WorldSnapshot } from '../../packages/contracts/src/world.js';
+import { WORLD_ROOM_DIMENSIONS } from '../../packages/contracts/src/world-models.js';
 
 describe('world motion independent of renderer', () => {
   it('walks continuously at equal diagonal and straight speed, without overshooting the target', () => {
@@ -116,8 +117,9 @@ describe('room geometry and nearby arcade selection', () => {
   });
   it('uses room bounds instead of world coordinates while indoors', () => {
     const bounds = sceneBounds({ self: { room_id: 'room' } } as WorldSnapshot);
-    const position = walk({ x: 1.41, y: 1.11 }, { x: 1, y: 1 }, null, 0.05, bounds);
-    expect(position.x).toBeCloseTo(1.42); expect(position.y).toBeCloseTo(1.12);
+    const position = walk({ x: bounds.max_x - 0.01, y: bounds.max_y - 0.01 }, { x: 1, y: 1 }, null, 0.05, bounds);
+    expect(position.x).toBeCloseTo(WORLD_ROOM_DIMENSIONS.width / 2 - 0.08);
+    expect(position.y).toBeCloseTo(WORLD_ROOM_DIMENSIONS.height / 2 - 0.08);
   });
 });
 

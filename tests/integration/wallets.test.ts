@@ -4,8 +4,8 @@ import type { Actor } from '../../packages/contracts/src/index.js';
 import { withTransaction } from '../../packages/database/src/index.js';
 import { buildApp } from '../../apps/api/src/app.js';
 import { lockActor, tokenHash } from '../../apps/api/src/core.js';
-import { reconcile, reserve, setIssuanceLimit } from '../../apps/api/src/modules/ledger/service.js';
-import { agent, context, fund, identity, resetLedgerTestData, testPools } from './ledger-fixtures.js';
+import { reconcile, reserve } from '../../apps/api/src/modules/ledger/service.js';
+import { agent, context, fund, fundUser, identity, resetLedgerTestData, testPools } from './ledger-fixtures.js';
 
 const pools = testPools(), origin = 'http://localhost:5173';
 type UserActor = Extract<Actor, { type: 'user' }>;
@@ -49,25 +49,26 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetLedgerTestData(pools.migration);
   owner = await session('admin'); other = await session();
+  await fundUser(pools.runtime, owner.actor, owner.actor.userId, '1000');
+  await fundUser(pools.runtime, owner.actor, other.actor.userId, '1000');
   ownAgent = await agent(pools.runtime, owner.actor); otherAgent = await agent(pools.runtime, other.actor);
 });
 afterAll(async () => { await app?.close(); await pools.runtime.end(); await pools.migration.end(); });
 
-describe('personal wallets, initial funds and owner-authorized transfers', () => {
-  it('grants exactly 1000 once, including concurrent retries, without consuming the monthly issuance budget', async () => {
-    const month = (await pools.runtime.query("SELECT to_char(clock_timestamp() AT TIME ZONE 'Asia/Shanghai','YYYY-MM') AS month")).rows[0].month as string;
-    await withTransaction(pools.runtime, tx => setIssuanceLimit(tx, context(owner.actor), { month, limitPoints: '0', reason: 'no manual issuance' }));
+describe('personal wallets and owner-authorized transfers', () => {
+  it('opens empty accounts once under concurrent retries without issuing currency', async () => {
+    const before = await report();
     const fresh = await session('member', false);
     await Promise.all(Array.from({ length: 3 }, () => pools.runtime.query('SELECT ledger.open_user_account($1)', [fresh.actor.userId])));
     await pools.runtime.query('SELECT ledger.open_user_account($1)', [fresh.actor.userId]);
-    expect((await get('/wallet', fresh)).json()).toMatchObject({ user_id: fresh.actor.userId, available: '1000', initial_grant: '1000' });
-    expect((await pools.runtime.query("SELECT count(*)::int n FROM ledger_accounts WHERE user_id=$1", [fresh.actor.userId])).rows[0].n).toBe(2);
-    expect((await pools.runtime.query("SELECT count(*)::int n FROM journal_transactions WHERE kind='INITIAL_GRANT'")).rows[0].n).toBe(3);
-    expect((await pools.runtime.query('SELECT limit_points,issued_points FROM credit_issuance_periods')).rows[0]).toEqual({ limit_points: '0', issued_points: '0' });
-    expect(await report()).toMatchObject({ ok: true, totals: { circulating: '3000', issuanceControl: '3000', issued: '3000' } });
+    expect((await get('/wallet', fresh)).json()).toMatchObject({ user_id: fresh.actor.userId, available: '0', initial_grant: '0' });
+    expect((await pools.runtime.query('SELECT count(*)::int n FROM ledger_accounts WHERE user_id=$1', [fresh.actor.userId])).rows[0].n).toBe(2);
+    expect((await pools.runtime.query("SELECT count(*)::int n FROM journal_transactions WHERE kind='INITIAL_GRANT'")).rows[0].n).toBe(0);
+    expect(await report()).toEqual(before);
   });
 
-  it('opens the wallet on real OAuth callback and keeps the grant unchanged on later logins', async () => {
+  it('opens an empty wallet on real OAuth callback without changing existing funded wallets', async () => {
+    const before = await report();
     for (let attempt = 0; attempt < 2; attempt++) {
       const start = await app.inject({ url: '/api/v1/auth/github/start' });
       expect(start.statusCode, start.body).toBe(302);
@@ -77,24 +78,23 @@ describe('personal wallets, initial funds and owner-authorized transfers', () =>
       expect(callback.statusCode, callback.body).toBe(302);
     }
     expect((await pools.runtime.query(`SELECT a.balance FROM users u JOIN ledger_accounts a ON a.user_id=u.id
-      WHERE u.github_user_id=987654321 AND a.bucket='USER_AVAILABLE'`)).rows).toEqual([{ balance: '1000' }]);
-    expect((await pools.runtime.query("SELECT count(*)::int n FROM journal_transactions WHERE kind='INITIAL_GRANT'")).rows[0].n).toBe(3);
-    expect((await report()).ok).toBe(true);
+      WHERE u.github_user_id=987654321 AND a.bucket='USER_AVAILABLE'`)).rows).toEqual([{ balance: '0' }]);
+    await pools.runtime.query('SELECT ledger.open_user_account($1)', [owner.actor.userId]);
+    expect((await get('/wallet')).json().available).toBe('1000');
+    expect(await report()).toEqual(before);
   });
 
-  it('rolls back wallet creation, initial issuance and audit together if the enclosing transaction fails', async () => {
-    const fresh = await session('member', false);
-    const before = await balances();
+  it('rolls back account opening together with its enclosing transaction', async () => {
+    const fresh = await session('member', false), before = await balances();
     const auditCount = (await pools.runtime.query('SELECT count(*)::int n FROM audit_events')).rows[0].n;
     await expect(withTransaction(pools.runtime, async tx => {
       await tx.query('SELECT ledger.open_user_account($1)', [fresh.actor.userId]);
-      throw new Error('abort initial grant');
-    })).rejects.toThrow('abort initial grant');
+      throw new Error('abort account opening');
+    })).rejects.toThrow('abort account opening');
     expect(await balances()).toEqual(before);
     expect((await pools.runtime.query('SELECT count(*)::int n FROM audit_events')).rows[0].n).toBe(auditCount);
-    expect((await pools.runtime.query("SELECT count(*)::int n FROM journal_transactions WHERE kind='INITIAL_GRANT'")).rows[0].n).toBe(2);
     await pools.runtime.query('SELECT ledger.open_user_account($1)', [fresh.actor.userId]);
-    expect((await get('/wallet', fresh)).json().available).toBe('1000');
+    expect((await get('/wallet', fresh)).json().available).toBe('0');
     expect((await report()).ok).toBe(true);
   });
 

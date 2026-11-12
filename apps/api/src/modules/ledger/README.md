@@ -17,6 +17,8 @@
 | --- | --- |
 | `setIssuanceLimit(tx, ctx, {month, limitPoints, reason})` | 管理员配置 `YYYY-MM` 月预算；不能降至已发行量以下 |
 | `issue(tx, ctx, {businessKey, amount, reason, month?})` | 当月发行到平台奖励池；业务重放先于当前预算检查 |
+| `recycle(tx, ctx, {businessKey, amount, reason})` | 管理员将回收款转回奖励池；保留未完成兑换退款准备金，不新增发行 |
+| `adminAdjustWallet(tx, ctx, {businessKey, wallet, ownerUserId, direction, amount, reason})` | 管理员从奖励池给个人/Agent可用钱包加分，或将可用积分扣至回收账户；不触碰冻结、不新增发行 |
 | `reserve(tx, ctx, {businessRef, payerAgentId, amount, permission, reason})` | 创建唯一冻结；`payerAgentId: null` 表示平台奖励池 |
 | `adjustHold(tx, ctx, {holdId, amount, revision, permission, reason})` | 将剩余冻结调整为 `amount`；增加按当前总承诺校验，而非仅校验增量 |
 | `finalizeHold(tx, ctx, {holdId, payments, refund, reason})` | 一次完成全部分账及退款，二者总和必须等于剩余冻结 |
@@ -26,7 +28,11 @@
 
 转账入口先解析收款方 owner，将双方用户 ID 交给 `command` 按统一顺序锁定，然后锁 Agent、付款 Agent 策略与账户，避免双向转账死锁。只有用户 Session 可发起，源钱包必须属于本人；人工转账不检验 Agent 的自动权限与限额，但 Agent 转出仍记当日支出。请求键和用户范围内的 `transfer_id` 共同防止重试重复扣款。
 
-`ledger.open_user_account(user_id)` 在同事务开户并发放一次 1000 积分，固定业务键为 `initial-funds:user:<id>`。迁移为已有用户补发，OAuth 同事务为后续用户开户。`INITIAL_GRANT` 只允许系统把固定 1000 从发行控制账户记入用户可用账户，不改变月度人工发行预算；对账发行总量为月度发行累计加初始金累计。用户账户使用 `USER_AVAILABLE`，不会进入旧 Agent 冻结/结算路径。
+管理员积分调整也先将管理员与目标owner按用户ID排序加锁，随后复核目标Agent归属。使用独立 `ADMIN_ADJUST` 分录，数据库只接受奖励池到可用账户、可用账户到回收账户两种组合。处理理由记录到用户可见流水；操作不能用于修改历史分录或解除账本隔离。
+
+`ledger.open_user_account(user_id)` 在同事务幂等建立零余额的个人可用与冻结账户。0031 起注册不发放积分；既有余额和历史 `INITIAL_GRANT` 流水保留，账本拒绝新增该类发行。对账发行总量仍为月度发行累计加历史初始金累计。
+
+运营管理的“发行管理”页显示用户与 Agent 可用余额、冻结余额、回收款、奖励池和退款准备金，并提供“回流到平台奖励池”入口。回流沿用账本幂等和审计，只能使用扣除 `pending` / `processing` 兑换金额后的回收款；资金再通过任务或有效贡献发放。回流不会消耗或增加发行预算。月度人工发行仍受显式预算限制，未经配置的月份预算为零。
 
 `adjustHold.amount` 必须为正；释放全部冻结使用 `finalizeHold`，以便支付与取消共用唯一最终业务键。结算不再检验新消费开关或新限额，合法系统履约不依赖旧 key 仍有效。调用者必须在领域模块判断合同是否允许调整或结算。
 

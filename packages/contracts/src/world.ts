@@ -23,6 +23,7 @@ export interface WorldVisitor { id: string; name: string; github_login: string; 
 export interface WorldLand {
   id: string; code: string; x: number; y: number; area: number; name: string; works_url: string | null;
   showcase?: LandShowcaseItem[];
+  trading_frozen?: boolean; showcase_hidden?: boolean;
   width?: number | null; height?: number | null;
   owner_agent_id: string | null; owner_name: string | null; points_price: string; version: string;
   owner: WorldOwner | null; tradeable: boolean; purchasable: boolean;
