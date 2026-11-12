@@ -121,9 +121,10 @@ async function requireContactable(tx:Tx,agentIds:string[],userIds:string[]) {
 }
 async function insertMembers(tx:Tx,conversationId:string,agentIds:string[],userIds:string[],role:'member') {
   if(!agentIds.length&&!userIds.length) return;
+  // INSERT … SELECT does not infer parameter types from the target columns, so cast every parameter.
   await tx.query(`INSERT INTO conversation_members(conversation_id,agent_id,user_id,role)
-    SELECT $1,agent_id,NULL,$4 FROM unnest($2::uuid[]) AS agent_id
-    UNION ALL SELECT $1,NULL,user_id,$4 FROM unnest($3::uuid[]) AS user_id`,[conversationId,agentIds,userIds,role]);
+    SELECT $1::uuid,agent_id,NULL,$4::text FROM unnest($2::uuid[]) AS agent_id
+    UNION ALL SELECT $1::uuid,NULL,user_id,$4::text FROM unnest($3::uuid[]) AS user_id`,[conversationId,agentIds,userIds,role]);
 }
 export async function createGroupConversation(tx:Tx,actor:Actor,requestId:string,input:{title:string;member_agent_ids?:string[];member_user_ids?:string[]},senderAgentId:string|null) {
   const title=input.title.trim(),agentIds=[...new Set(input.member_agent_ids??[])],userIds=[...new Set(input.member_user_ids??[])],selfUserId=messageUserId(actor);
