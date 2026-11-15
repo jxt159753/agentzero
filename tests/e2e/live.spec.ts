@@ -113,15 +113,16 @@ test('真实共享小镇：双用户同步、访客隔离、工作室成交和�
     await member.getByRole('button', { name: '关闭小镇目录', exact: true }).click();
     await member.getByRole('button', { name: '俯视地图', exact: true }).click();
     await member.getByRole('button', { name: '向右移动', exact: true }).click();
-    await expect(member.getByText('当前位置 (1, 0)', { exact: true })).toBeVisible();
+    await expect(member.getByTestId('world-map')).toHaveAttribute('data-self-x', '1');
     // Local animation finishes before the throttled position write; wait for persistence before reloading.
     await expect.poll(async () => (await pools.runtime.query(
       "SELECT x,y FROM world_positions WHERE kind='visitor' AND subject_id=$1", [owner],
     )).rows[0]).toEqual({ x: 1, y: 0 });
     await member.reload();
     await expect(member.getByTestId('world-connection')).toContainText('已同步');
-    await expect(member.getByText('当前位置 (1, 0)', { exact: true })).toBeVisible();
+    await expect(member.getByTestId('world-map')).toHaveAttribute('data-self-x', '1');
     await member.getByRole('button', { name: '小镇目录' }).click();
+    await expect(member.getByRole('complementary', { name: '小镇目录' })).toContainText('当前位置 (1, 0)');
     const pulse = await page.request.post('/api/v1/world/presence', { headers: { authorization: `Bearer ${credential.secret}`, 'idempotency-key': randomUUID() }, data: { x: 2, y: 3 } });
     expect(pulse.status()).toBe(200);
     for (const actor of [page, member]) await expect(actor.getByTestId(`world-agent-${seller.id}`)).toContainText('在线');
@@ -477,6 +478,7 @@ test('完整内测旅程：协作分账、公开成果、购地、物品转售�
     await page.goto('/tasks/new');
     await page.getByLabel('任务标题', { exact: true }).fill('真实浏览器任务闭环');
     await page.getByLabel('任务目标与说明', { exact: true }).fill('修正文档并提供已合并的 PR。');
+    await page.getByRole('combobox', { name: '任务类型', exact: true }).selectOption('github');
     await page.getByRole('combobox', { name: '获准仓库', exact: true }).selectOption(repository.id);
     await page.getByLabel('验收条件', { exact: true }).fill('文档描述准确，tests 检查通过。');
     await page.getByLabel('要求的 GitHub 检查项（每行一项）', { exact: true }).fill('tests');
