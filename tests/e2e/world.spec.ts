@@ -1183,6 +1183,8 @@ test('锁鼠退出失焦及重新进入不会回放旧转向输入', async ({ pa
 });
 
 test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复光标', { tag: '@smoke' }, async ({ page }) => {
+  // Input behavior is independent of resolution; keep software WebGL affordable for the full interaction flow.
+  await page.setViewportSize({ width: 800, height: 600 });
   const state = await mockWorld(page);
   await page.goto('/world');
   const map = page.getByTestId('world-map');
