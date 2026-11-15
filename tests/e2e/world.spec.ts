@@ -1206,8 +1206,12 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   });
   expect(turnedYaw).toBeLessThan(-0.9);
   await map.focus(); await page.keyboard.down('w');
-  await expect.poll(async () => Number(await map.getAttribute('data-self-x'))).toBeGreaterThan(0);
+  // Software rendering in CI can take seconds per frame; observe painted movement instead of wall-clock distance.
+  const paint = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await paint();
+  expect(Number(await map.getAttribute('data-self-x'))).toBeGreaterThan(0);
   await page.keyboard.up('w');
+  await paint();
   await expect.poll(() => state.moves.at(-1)?.moving).toBe(false);
   expect(Number(await map.getAttribute('data-self-y'))).toBeLessThan(0);
   await expect(map).toHaveAttribute('data-pointer-locked', 'true');
