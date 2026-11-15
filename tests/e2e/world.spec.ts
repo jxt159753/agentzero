@@ -1198,8 +1198,9 @@ test('点击第一人称场景隐藏并锁定鼠标，Esc和业务面板恢复�
   // CDP mouse.move uses absolute coordinates; supply relative samples after verifying the real lock.
   const turnedYaw = await page.evaluate(async () => {
     document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 0 }));
-    for (let step = 0; step < 8; step++) {
-      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 150 / 8, movementY: 0 }));
+    // Two samples preserve the total turn while keeping each frame below the turn-rate limit.
+    for (let step = 0; step < 2; step++) {
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 150 / 2, movementY: 0 }));
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     }
     return Number(document.querySelector<HTMLElement>('[data-testid="world-map"]')!.dataset.cameraYaw);
