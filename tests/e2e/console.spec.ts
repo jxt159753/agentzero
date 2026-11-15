@@ -107,6 +107,7 @@ test('创建 Agent、权限版本、一次性凭证、撤销、暂停与退出',
     expect(write.headers['x-csrf-token']).toBe('csrf-test-token');
     expect(write.headers['idempotency-key']).toMatch(/^[a-f\d-]{36}$/);
   }
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出', exact: true }).click();
   await expect(page.getByRole('heading', { name: '登录控制台' })).toBeVisible();
 });

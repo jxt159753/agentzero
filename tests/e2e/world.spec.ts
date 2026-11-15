@@ -13,6 +13,68 @@ const taskId = '44000000-0000-4000-8000-000000000001';
 const timestamp = '2026-11-07T09:00:00.000Z';
 const respond = (route: Route, data: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
 
+test('沉浸小镇铺满视口，图标导航与设置菜单在桌面和手机均可操作', async ({ page }) => {
+  await mockWorld(page);
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/world');
+    const map = page.getByTestId('world-map');
+    await expect(map).toHaveAttribute('data-assets-loaded', '7');
+    expect(await map.boundingBox()).toEqual({ x: 0, y: 0, ...viewport });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight)).toBe(true);
+    const settings = page.getByRole('button', { name: '设置', exact: true });
+    await expect(settings.locator('svg')).toHaveCount(1);
+    await settings.click();
+    const panel = page.getByRole('region', { name: '小镇设置', exact: true });
+    await expect(panel).toContainText('@owner');
+    await panel.getByText('操作指南', { exact: true }).click();
+    await expect(panel).toContainText('Alt');
+    await expect(panel).toContainText('呼出鼠标');
+    await page.keyboard.press('Escape');
+    await expect(settings).toBeFocused();
+    await expect(panel).toHaveCount(0);
+    await settings.click();
+    await page.getByRole('button', { name: '小镇目录', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await page.getByRole('button', { name: '关闭小镇目录', exact: true }).click();
+    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '我的 Agent', exact: true }).click();
+    await expect(page).toHaveURL('/agents');
+    const feature = page.getByRole('region', { name: '功能面板', exact: true });
+    const bounds = (await feature.boundingBox())!, dock = (await page.getByRole('navigation', { name: '主导航' }).boundingBox())!;
+    expect(bounds.y).toBeGreaterThan(60);
+    expect(bounds.y + bounds.height).toBeLessThan(dock.y);
+    await page.getByRole('button', { name: '关闭功能面板', exact: true }).click();
+    await expect(page).toHaveURL('/world');
+    await expect(page.getByRole('heading', { name: '我们的 Agent 小镇', exact: true })).toBeVisible();
+    await page.screenshot({ path: `test-results/issue-8-${viewport.width}.png`, fullPage: true });
+  }
+});
+
+test('Alt呼出鼠标并停止行走，松开Alt后可操作UI与重新漫游', { tag: '@smoke' }, async ({ page }) => {
+  const state = await mockWorld(page);
+  await page.goto('/world');
+  const map = page.getByTestId('world-map');
+  await expect(map).toHaveAttribute('data-assets-loaded', '7');
+  await page.getByRole('button', { name: '进入漫游', exact: true }).click();
+  await expect(map).toHaveAttribute('data-pointer-locked', 'true');
+  await page.keyboard.down('w');
+  await expect.poll(() => state.moves.some(move => move.moving)).toBe(true);
+  await page.keyboard.down('Alt');
+  await expect(map).toHaveAttribute('data-pointer-locked', 'false');
+  await expect.poll(() => state.moves.at(-1)?.moving).toBe(false);
+  await page.keyboard.up('Alt'); await page.keyboard.up('w');
+  const stopped = state.moves.at(-1);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await expect(page.getByRole('region', { name: '小镇设置' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '进入漫游', exact: true }).click();
+  await expect(map).toHaveAttribute('data-pointer-locked', 'true');
+  await page.waitForTimeout(600);
+  expect(state.moves.at(-1)).toEqual(stopped);
+  await page.keyboard.press('Alt');
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement)).toBeNull();
+});
+
 async function mockWorld(page: Page) {
   const land: WorldLand = { id: landId, code: 'TOWN-01', x: 2, y: 1, area: 100, name: '青苔工作室', works_url: 'https://example.com/works', owner_agent_id: agentId, owner_name: '设计伙伴', owner: { id: userId, github_login: 'owner', display_name: '小镇主人' }, tradeable: true, purchasable: false, points_price: '40', version: '1', listing: { id: '54000000-0000-4000-8000-000000000001', version: '1', points_price: '50' }, decorations: [{ id: '64000000-0000-4000-8000-000000000001', name: '桌面绿植', appearance: 'plant' }] };
   const world: WorldSnapshot = { server_time: timestamp, presence_ttl_seconds: 60, self: { kind: 'visitor', id: userId, x: 0, y: 0, online: true }, places: WORLD_PLACES, bounds: WORLD_BOUNDS, public_areas: WORLD_PUBLIC_AREAS, lands: [land], agents: [{ id: agentId, name: '设计伙伴', owner: { id: userId, github_login: 'owner', display_name: '小镇主人' }, status: 'active', online: false, x: 2, y: 1 }, { id: otherAgentId, name: '代码伙伴', owner: { id: otherUserId, github_login: 'neighbor', display_name: '邻居' }, status: 'active', online: true, x: -2, y: 1 }], visitors: [{ id: userId, name: '小镇主人', github_login: 'owner', online: true, x: 0, y: 0 }, { id: otherUserId, name: '邻居', github_login: 'neighbor', online: true, x: 1, y: 0 }] };
@@ -401,11 +463,11 @@ test('地块展示气泡分页呈现四类内容，媒体按需加载且手机�
     return frame.y >= item.y && frame.bottom <= item.bottom + 1;
   })).toBe(true);
   await assertPreviewInView();
-  const games = (await page.getByRole('button', { name: '游戏工坊', exact: true }).boundingBox())!;
+  const games = (await page.getByRole('link', { name: '游戏工坊', exact: true }).boundingBox())!;
   const currentBubble = (await bubble.boundingBox())!;
   const overlap = { left: Math.max(games.x, currentBubble.x), top: Math.max(games.y, currentBubble.y), right: Math.min(games.x + games.width, currentBubble.x + currentBubble.width), bottom: Math.min(games.y + games.height, currentBubble.y + currentBubble.height) };
   if (overlap.right > overlap.left && overlap.bottom > overlap.top) {
-    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[data-land-showcase]')), { x: (overlap.left + overlap.right) / 2, y: (overlap.top + overlap.bottom) / 2 })).toBe(true);
+    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('nav[aria-label="主导航"]')), { x: (overlap.left + overlap.right) / 2, y: (overlap.top + overlap.bottom) / 2 })).toBe(true);
   }
   await assertActionsInView();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -807,7 +869,10 @@ test('共享地图显示真实工作室、独立访客与离线 Agent，移动�
   await page.getByRole('button', { name: '关闭小镇目录', exact: true }).click();
   await page.getByRole('button', { name: '俯视地图', exact: true }).click();
   await page.getByRole('button', { name: '向右移动', exact: true }).click();
-  await expect(page.getByRole('region', { name: '我的访客角色' })).toContainText('当前位置 (1, 0)');
+  await expect(page.getByTestId('world-map')).toHaveAttribute('data-self-x', '1');
+  await page.getByRole('button', { name: '小镇目录', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: '小镇目录' })).toContainText('当前位置 (1, 0)');
+  await page.getByRole('button', { name: '关闭小镇目录', exact: true }).click();
   await expect.poll(() => state.moves.some(move => move.x === 1 && !move.moving)).toBe(true);
   const movement = state.moves.find(move => move.x === 1);
   expect(movement).toMatchObject({ type: 'move', x: 1, y: 0 });
