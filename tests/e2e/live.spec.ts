@@ -26,7 +26,7 @@ async function login(page: Page, githubId: '71001' | '71002' | '71003' | '71004'
   });
   await page.goto(startPath);
   await page.getByRole('link', { name: '使用 GitHub 登录' }).click();
-  await expect(page.getByRole('button', { name: '退出', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible();
 }
 
 async function csrf(page: Page) {
@@ -113,15 +113,16 @@ test('真实共享小镇：双用户同步、访客隔离、工作室成交和�
     await member.getByRole('button', { name: '关闭小镇目录', exact: true }).click();
     await member.getByRole('button', { name: '俯视地图', exact: true }).click();
     await member.getByRole('button', { name: '向右移动', exact: true }).click();
-    await expect(member.getByText('当前位置 (1, 0)', { exact: true })).toBeVisible();
+    await expect(member.getByTestId('world-map')).toHaveAttribute('data-self-x', '1');
     // Local animation finishes before the throttled position write; wait for persistence before reloading.
     await expect.poll(async () => (await pools.runtime.query(
       "SELECT x,y FROM world_positions WHERE kind='visitor' AND subject_id=$1", [owner],
     )).rows[0]).toEqual({ x: 1, y: 0 });
     await member.reload();
     await expect(member.getByTestId('world-connection')).toContainText('已同步');
-    await expect(member.getByText('当前位置 (1, 0)', { exact: true })).toBeVisible();
+    await expect(member.getByTestId('world-map')).toHaveAttribute('data-self-x', '1');
     await member.getByRole('button', { name: '小镇目录' }).click();
+    await expect(member.getByRole('complementary', { name: '小镇目录' })).toContainText('当前位置 (1, 0)');
     const pulse = await page.request.post('/api/v1/world/presence', { headers: { authorization: `Bearer ${credential.secret}`, 'idempotency-key': randomUUID() }, data: { x: 2, y: 3 } });
     expect(pulse.status()).toBe(200);
     for (const actor of [page, member]) await expect(actor.getByTestId(`world-agent-${seller.id}`)).toContainText('在线');
@@ -410,6 +411,7 @@ test('真实数据库浏览器流程：OAuth、Agent、策略、凭证、隔离�
   await expect(page.getByText('可用 +9,007,199,254,740,993', { exact: true })).toBeVisible();
   const report = await page.request.post('/api/v1/admin/reconciliation', { headers: { origin, 'x-csrf-token': await csrf(page), 'idempotency-key': randomUUID() }, data: {} });
   expect((await report.json()).ok).toBe(true);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出', exact: true }).click();
   await expect(page.getByRole('heading', { name: '登录控制台' })).toBeVisible();
   expect((await pools.runtime.query('SELECT revoked_at IS NOT NULL AS revoked FROM user_sessions WHERE id=$1', [session.id])).rows[0].revoked).toBe(true);
@@ -476,6 +478,7 @@ test('完整内测旅程：协作分账、公开成果、购地、物品转售�
     await page.goto('/tasks/new');
     await page.getByLabel('任务标题', { exact: true }).fill('真实浏览器任务闭环');
     await page.getByLabel('任务目标与说明', { exact: true }).fill('修正文档并提供已合并的 PR。');
+    await page.getByRole('combobox', { name: '任务类型', exact: true }).selectOption('github');
     await page.getByRole('combobox', { name: '获准仓库', exact: true }).selectOption(repository.id);
     await page.getByLabel('验收条件', { exact: true }).fill('文档描述准确，tests 检查通过。');
     await page.getByLabel('要求的 GitHub 检查项（每行一项）', { exact: true }).fill('tests');

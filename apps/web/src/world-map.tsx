@@ -12,6 +12,7 @@ import { createAgentActivity, sampleAgentActivity, type AgentActivityPlan } from
 import { AgentSocialActivity } from './world-agent-social';
 import { WORLD_ASSET_CREDITS } from './world-assets';
 import { LandShowcase } from './land-showcase';
+import { Icon } from './icons';
 import worldStyles from './world.module.css';
 
 interface MapProps {
@@ -777,12 +778,12 @@ export default function WorldMap(props: MapProps) {
   }, [failed, props.disabled, props.editingLandId]);
   useEffect(() => { controls.current?.wake(); }, [props.world, props.camera, props.disabled, props.editingLandId, props.placement, props.editingRoomId, nearbyLand, arcade]);
   return <div ref={host} className={worldStyles.map} data-testid="world-map" data-view={view} tabIndex={0} role="group"
-    aria-label={view === 'first-person' ? '共享小镇第一人称，点击场景锁定鼠标，WASD 行走，Shift 跑动，空格跳跃，E 与附近目标互动，F 联系附近 Agent，V 浏览地块展示，Esc 释放鼠标；触屏拖动环视' : '共享小镇俯视地图，点击空地行走，拖动查看，右键拖动旋转'}
+    aria-label={view === 'first-person' ? '共享小镇第一人称，点击场景锁定鼠标，WASD 行走，Shift 跑动，空格跳跃，E 与附近目标互动，F 联系附近 Agent，V 浏览地块展示，Alt 或 Esc 释放鼠标；触屏拖动环视' : '共享小镇俯视地图，点击空地行走，拖动查看，右键拖动旋转'}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) controls.current?.stop(); }}
     onKeyDown={event => {
       if (event.target !== event.currentTarget || gameActive.current) return;
       const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-      if (key === 'Escape') { event.preventDefault(); controls.current?.stop(); }
+      if (key === 'Escape' || key === 'Alt') { event.preventDefault(); controls.current?.stop(); }
       else if (key === 'e' && !event.repeat && !props.disabled && !props.editingLandId) { event.preventDefault(); controls.current?.interact(); }
       else if (key === 'f' && !event.repeat && !props.disabled && !props.editingLandId) { event.preventDefault(); controls.current?.message(); }
       else if (key === 'v' && !event.repeat && !props.disabled && !props.editingLandId) { event.preventDefault(); controls.current?.showcase(); }
@@ -796,14 +797,14 @@ export default function WorldMap(props: MapProps) {
     {!failed && !props.disabled && <>
       <span className={worldStyles.sceneTime} data-testid="world-clock">{clockLabel}</span>
       {!props.editingLandId && <div className={worldStyles.sceneViewModes} aria-label="小镇视角">
-        <button aria-pressed={view === 'first-person'} onClick={() => controls.current?.setView('first-person')}>第一人称</button>
-        <button aria-pressed={view === 'overview'} onClick={() => controls.current?.setView('overview')}>俯视地图</button>
+        <button aria-label="第一人称" title="第一人称" aria-pressed={view === 'first-person'} onClick={() => controls.current?.setView('first-person')}><Icon name="walk" /></button>
+        <button aria-label="俯视地图" title="俯视地图" aria-pressed={view === 'overview'} onClick={() => controls.current?.setView('overview')}><Icon name="overview" /></button>
       </div>}
       {view === 'overview' && <div className={worldStyles.sceneCompass} aria-label="3D 视角控制"><button aria-label="向左旋转视角" onClick={() => controls.current?.rotate(-1)}>↶</button><span>3D</span><button aria-label="向右旋转视角" onClick={() => controls.current?.rotate(1)}>↷</button></div>}
       {view === 'first-person' && !props.editingLandId && <>
         <button className={worldStyles.sceneRoam} onClick={() => locked ? controls.current?.stop() : controls.current?.enter()}>{locked ? '退出漫游' : '进入漫游'}</button>
         <span className={worldStyles.sceneCrosshair} aria-hidden="true" />
-        <div className={worldStyles.sceneWalkHelp}>{lockNotice || (locked ? 'WASD 行走 · Shift 跑动 · 空格跳跃 · E 互动 · Esc 显示鼠标' : '点击场景漫游 · Shift 跑动 · 空格跳跃 · 触屏拖动环视')}</div>
+        <div className={worldStyles.sceneWalkHelp}>{lockNotice || (locked ? 'WASD 行走 · E 互动 · Alt / Esc 呼出鼠标' : '点击场景开始漫游 · Alt 呼出鼠标 · 齿轮查看操作指南')}</div>
       </>}
       {!props.editingLandId && <>
         {nearbyDoor && <div className={worldStyles.sceneDoor} role="region" aria-label="房屋入口"><strong>{nearbyDoor.title}</strong><button onClick={() => { controls.current?.stop(); props.onRoom(nearbyDoor.id || null); }}>{nearbyDoor.detail}</button></div>}
