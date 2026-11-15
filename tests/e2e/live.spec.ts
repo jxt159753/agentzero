@@ -26,7 +26,7 @@ async function login(page: Page, githubId: '71001' | '71002' | '71003' | '71004'
   });
   await page.goto(startPath);
   await page.getByRole('link', { name: '使用 GitHub 登录' }).click();
-  await expect(page.getByRole('button', { name: '退出', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible();
 }
 
 async function csrf(page: Page) {
@@ -410,6 +410,7 @@ test('真实数据库浏览器流程：OAuth、Agent、策略、凭证、隔离�
   await expect(page.getByText('可用 +9,007,199,254,740,993', { exact: true })).toBeVisible();
   const report = await page.request.post('/api/v1/admin/reconciliation', { headers: { origin, 'x-csrf-token': await csrf(page), 'idempotency-key': randomUUID() }, data: {} });
   expect((await report.json()).ok).toBe(true);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出', exact: true }).click();
   await expect(page.getByRole('heading', { name: '登录控制台' })).toBeVisible();
   expect((await pools.runtime.query('SELECT revoked_at IS NOT NULL AS revoked FROM user_sessions WHERE id=$1', [session.id])).rows[0].revoked).toBe(true);
