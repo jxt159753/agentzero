@@ -23,11 +23,11 @@
 .showcaseHint { margin:0 0 10px; color:#6a795c; font-size:11px; flex-shrink:0; }
 .showcaseVisit { margin-top:12px; background:transparent; color:#49633f; font-size:11px; padding:6px 0; flex-shrink:0; text-align:left; }
 @media(max-width:480px) { .sceneLandShowcase { width:calc(100% - 24px); padding:10px; } }
-.sceneViewModes { position:absolute; right:20px; top:82px; display:flex; gap:3px; padding:4px; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:9px; box-shadow:0 3px 12px #4a623310; }
+.sceneViewModes { position:absolute; z-index:4; right:20px; top:82px; display:flex; gap:3px; padding:4px; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:9px; box-shadow:0 3px 12px #4a623310; }
 .sceneViewModes button { display:grid; place-items:center; width:38px; height:38px; padding:0; color:#607254; background:transparent; border-radius:6px; font-size:11px; }.sceneViewModes button[aria-pressed="true"] { color:#f7f9ed; background:#567452; }
-.sceneCompass { position:absolute; right:20px; top:140px; display:flex; align-items:center; gap:2px; padding:4px; border:1px solid #d4ddc4; border-radius:8px; background:#fffdf2ed; box-shadow:0 3px 12px #4a623310; }
+.sceneCompass { position:absolute; z-index:4; right:20px; top:140px; display:flex; align-items:center; gap:2px; padding:4px; border:1px solid #d4ddc4; border-radius:8px; background:#fffdf2ed; box-shadow:0 3px 12px #4a623310; }
 .sceneCompass button { background:transparent; color:#5e7554; padding:4px 7px; font-size:20px; line-height:1; }.sceneCompass button:hover { background:#eaf0dc; }.sceneCompass span { color:#839175; font-size:10px; letter-spacing:1px; }
-.sceneRoam { position:absolute; top:140px; right:20px; padding:9px 15px; color:#49633f; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:8px; font-size:11px; }
+.sceneRoam { position:absolute; z-index:4; top:140px; right:20px; padding:9px 15px; color:#49633f; background:#fffdf2ed; border:1px solid #d4ddc4; border-radius:8px; font-size:11px; }
 .sceneCrosshair { position:absolute; left:50%; top:50%; width:11px; height:11px; transform:translate(-50%,-50%); border:1px solid #fffef4d9; border-radius:50%; box-shadow:0 0 0 1px #344e4080; pointer-events:none; }.sceneCrosshair::after { content:''; position:absolute; width:3px; height:3px; left:3px; top:3px; background:#fffef4; border-radius:50%; }
 .sceneWalkHelp { position:absolute; left:50%; transform:translateX(-50%); bottom:98px; padding:7px 12px; max-width:calc(100% - 320px); text-align:center; border-radius:6px; background:#fffdf2db; color:#657456; font-size:10px; line-height:1.5; pointer-events:none; }
 .sceneTime { position:absolute; top:138px; left:20px; padding:6px 9px; border-radius:6px; color:#607254; background:#fffdf2de; font-size:10px; font-variant-numeric:tabular-nums; pointer-events:none; }
