@@ -106,6 +106,7 @@ async function mockWorld(page: Page) {
     const body = request.method() === 'GET' ? {} : request.postDataJSON() as Record<string, unknown>;
     if (request.method() !== 'GET') writes.push({ path, body, key: request.headers()['idempotency-key'] ?? '', csrf: request.headers()['x-csrf-token'] ?? '' });
     if (path === '/me') return respond(route, { actor: { type: 'user', userId }, user: { id: userId, github_login: 'owner', display_name: '小镇主人', status: 'active', role: 'member' } });
+    if (path === '/messages') return respond(route, { items: [], next_cursor: '0', has_more: false });
     if (path.startsWith('/games/machines/')) return respond(route, { placement_id: path.split('/').at(-1), game: null });
     if (path === '/world') return respond(route, world);
     if (path === '/world/presence') {
@@ -632,7 +633,8 @@ test('小镇按服务端北京时间昼夜切换，路灯夜间亮起且不增�
   state.world.server_time = '2026-11-07T04:00:00.000Z';
   Object.assign(state.world.self, { x: 3, y: 1.5 });
   Object.assign(state.world.visitors[0]!, { x: 3, y: 1.5 });
-  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/v1/')) apiRequests.push(request.url()); });
+  // Global message reminders poll independently of the scene's daylight and presence synchronization.
+  page.on('request', request => { const path = new URL(request.url()).pathname; if (path.startsWith('/api/v1/') && path !== '/api/v1/messages') apiRequests.push(request.url()); });
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/world');
   const map = page.getByTestId('world-map');

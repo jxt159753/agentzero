@@ -18,6 +18,7 @@
 .contact:hover:not(:disabled) { background:#edf1e9; text-decoration:none; }
 .contact.selected { background:#e3eddc; }
 .avatar { width:41px; height:41px; display:grid; place-items:center; flex-shrink:0; border-radius:12px; background:#dae7e3; color:#3d7167; font-size:16px; font-weight:650; }
+.contactAvatar { position:relative; flex-shrink:0; }.contactAvatar > i { top:-2px; right:-2px; }
 .agentAvatar { background:#e9e3d2; color:#8c784c; }
 .contactText { flex:1; min-width:0; }
 .contactText strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
@@ -85,3 +86,12 @@
 .overlay { position:fixed; inset:0; z-index:100; display:flex; justify-content:center; align-items:center; padding:20px; background:#10241cb3; }
 .overlayContent { position:relative; width:min(720px,100%); max-height:90dvh; overflow:auto; border-radius:10px; background:#fff; }
 .closePanel { position:absolute; right:12px; top:10px; z-index:1; font-size:24px; padding:3px 10px; background:transparent; color:#496252; }
+@media(orientation:landscape) and (max-height:540px) {
+  .messenger { grid-template-columns:210px minmax(0,1fr); }
+  .sidebarHeading { padding:10px 14px 6px; }.sidebarHeading h1 { font-size:18px; }
+  .tabs { gap:16px; padding:4px 14px 0; }.tabs button { padding:5px 0; font-size:11px; }
+  .contact { padding:10px 8px; }.chatHeading { min-height:48px; padding:6px 14px; }.chatHeading > .avatar { width:30px; height:30px; font-size:12px; }.chatHeading h2 { font-size:13px; }
+  .timeline { padding:10px 14px; }.messageList li { margin-bottom:12px; }
+  .composer { padding:4px 12px 6px; }.senderLine { min-height:20px; margin:0; }.composer textarea { min-height:32px; height:32px; padding:3px 0; }.composerFooter { margin-top:2px; }.composerFooter button { padding:5px 16px; }
+  .overlayContent { max-height:calc(100dvh - 20px); }
+}

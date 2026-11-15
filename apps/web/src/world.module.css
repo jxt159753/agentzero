@@ -95,3 +95,21 @@
 @keyframes panelIn { from { opacity:0; translate:0 8px; } to { opacity:1; translate:0 0; } }
 @media(max-width:640px) { .townActions { top:max(12px,env(safe-area-inset-top)); right:68px; gap:6px; } }
 @media(prefers-reduced-motion:reduce) { .town button { transition:none; }.town button:active:not(:disabled) { transform:none; }.directoryDrawer,.featureOverlay { animation:none; } }
+@media(orientation:landscape) and (max-height:540px) {
+  .townTitle { top:max(8px,env(safe-area-inset-top)); left:max(175px,calc(env(safe-area-inset-left) + 170px)); padding:6px 10px; }
+  .townTitle h1 { font-size:11px; margin:0; }.titleMeta { font-size:9px; }.titleMeta > span:last-child:not(.status) { display:none; }.status { font-size:9px; }
+  .townActions { top:max(8px,env(safe-area-inset-top)); right:max(58px,calc(env(safe-area-inset-right) + 58px)); gap:6px; }.townActions button { width:38px; height:38px; border-radius:12px; }
+  .sceneTime { top:56px; left:max(12px,env(safe-area-inset-left)); font-size:9px; }
+  .sceneViewModes { top:54px; right:max(12px,env(safe-area-inset-right)); padding:3px; }.sceneViewModes button { width:32px; height:32px; }
+  .sceneCompass,.sceneRoam { top:102px; right:max(12px,env(safe-area-inset-right)); }
+  .sceneMovement { right:max(12px,env(safe-area-inset-right)); bottom:max(8px,env(safe-area-inset-bottom)); padding:5px; gap:4px; }
+  .sceneMovement .movePad { grid-template-columns:repeat(3,36px); grid-template-rows:repeat(2,36px); }.motionActions button { padding:7px 2px; }
+  .mapTools { left:max(12px,env(safe-area-inset-left)); bottom:max(8px,env(safe-area-inset-bottom)); flex-wrap:wrap; max-width:140px; gap:0; padding:3px; }.mapTools button { padding:6px; font-size:10px; }.mapTools > span { min-width:24px; }.mapTools .toolDivider { display:none; }
+  .sceneWalkHelp { bottom:62px; left:50%; transform:translateX(-50%); max-width:calc(100% - 330px); font-size:9px; padding:4px 8px; }
+  .sceneCredits { bottom:2px; right:150px; font-size:7px; }
+  .sceneNearby { top:148px; right:max(12px,env(safe-area-inset-right)); width:150px; padding:8px; }
+  .sceneTooltip { bottom:84px; }.sceneDoor { bottom:94px; max-width:calc(100% - 330px); padding:6px 10px; font-size:10px; }
+  .featureOverlay { inset:54px max(8px,env(safe-area-inset-right)) calc(64px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left)); border-radius:10px; }.overlayHeading { padding:4px 14px; }.overlayHeading button { height:26px; }.overlayContent { padding:14px; }
+  .directoryDrawer { top:54px; bottom:calc(64px + env(safe-area-inset-bottom)); right:max(12px,env(safe-area-inset-right)); padding:14px; }
+  .connectionNotice { top:85px; left:max(12px,env(safe-area-inset-left)); padding:8px; }
+}

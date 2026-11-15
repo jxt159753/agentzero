@@ -53,7 +53,7 @@ export default function WorldMap(props: MapProps) {
     const element = host.current, labelsElement = labelHost.current;
     if (!element || !labelsElement) return;
     let renderer: THREE.WebGLRenderer;
-    const mobile = window.matchMedia('(max-width: 800px)').matches;
+    const mobile = window.matchMedia('(max-width: 800px), (pointer: coarse)').matches;
     try { renderer = new THREE.WebGLRenderer({ antialias: !mobile, alpha: false, powerPreference: 'low-power' }); }
     catch { setFailed(true); return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.75));

@@ -33,5 +33,7 @@ export interface MessageDto {id:string;cursor:string;conversation_id:string;send
 export interface ConversationMemberDto {id:string;user_id:string|null;agent_id:string|null;name:string;owner_user_id:string;role:'owner'|'admin'|'member'}
 export interface ConversationDto {id:string;kind:'direct'|'group'|'task';task_id:string|null;title:string|null;created_at:string;members:ConversationMemberDto[];last_message?:MessageDto|null}
 export interface MessagePageDto {items:MessageDto[];next_cursor:string;has_more:boolean;conversation_id?:string|null}
+export interface MessageNotificationDto extends MessageDto {sender_owner_user_id:string;conversation_kind:ConversationDto['kind'];task_id:string|null}
+export interface MessageNotificationPageDto extends Omit<MessagePageDto,'items'> {items:MessageNotificationDto[]}
 export interface MessageRecipientDto {id:string;name:string;owner_user_id:string;owner_name:string}
 export interface MessageUserRecipientDto {id:string;name:string;github_login:string}

@@ -15,6 +15,8 @@ import { GameLibrary } from './games';
 import { WalletPage } from './wallet';
 import { RegistrationPage, useRegistrationReturn } from './registration';
 import { Icon, type IconName } from './icons';
+import { NotificationBadge, NotificationProvider, NotificationSettingsPanel } from './notifications';
+import { MobileLandscape } from './mobile-landscape';
 import type { Me } from './types';
 import styles from './style.module.css';
 import shell from './shell.module.css';
@@ -58,20 +60,20 @@ export function App() {
     <Route path="/operations" element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/world" replace />} />
     <Route path="*" element={<Navigate to="/world" replace />} />
   </Routes>;
-  return <div className={shell.app}>
+  return <MobileLandscape><NotificationProvider key={user.id} userId={user.id} enabled={user.status === 'active'}><div className={shell.app}>
     <a className={styles.skipLink} href="#main">跳转到主要内容</a>
     <header className={shell.toolbar}>
       <Link className={shell.brand} to="/world" aria-label="Agent 宇宙，返回小镇"><span className={shell.brandMark} aria-hidden>◈</span><span>Agent 宇宙</span></Link>
       <TownSettings user={user} pending={logout.pending} onLogout={() => void logout.run('/auth/logout', 'POST', {}, () => { client.clear(); window.location.assign('/'); })} />
     </header>
     {user.status === 'active' && <nav aria-label="主导航" className={shell.navigation}>
-      {[...destinations, ...(user.role === 'admin' ? [{ path: '/operations', icon: 'operations' as const, label: '运营管理' }] : [])].map(({ path, icon, label }) => <NavLink key={path} to={path} aria-label={label} title={label} className={({ isActive }) => isActive || path === '/world' && location.pathname === '/' ? shell.navActive : ''}><Icon name={icon} /><span>{label}</span></NavLink>)}
+      {[...destinations, ...(user.role === 'admin' ? [{ path: '/operations', icon: 'operations' as const, label: '运营管理' }] : [])].map(({ path, icon, label }) => <NavLink key={path} to={path} aria-label={label} title={label} className={({ isActive }) => isActive || path === '/world' && location.pathname === '/' ? shell.navActive : ''}><Icon name={icon} /><span>{label}</span><NotificationBadge destination={path} /></NavLink>)}
     </nav>}
     <main id="main" className={shell.stage}>
       {logout.error && <div className={shell.notice}><ErrorNotice error={logout.error} /></div>}
       {user.status !== 'active' ? <AccessStatus status={user.status} refresh={() => void me.refetch()} /> : <WorldPage overlay={panel} />}
     </main>
-  </div>;
+  </div></NotificationProvider></MobileLandscape>;
 }
 
 function TownSettings({ user, pending, onLogout }: { user: Me['user']; pending: boolean; onLogout: () => void }) {
@@ -102,6 +104,7 @@ function TownSettings({ user, pending, onLogout }: { user: Me['user']; pending: 
       <div className={shell.account}><span className={shell.avatar}>{(user.display_name || user.github_login).slice(0, 1).toUpperCase()}</span><div><strong>{user.display_name || user.github_login}</strong><small>@{user.github_login}</small></div></div>
       {document.fullscreenEnabled && <button className={shell.settingsAction} onClick={() => void toggleFullscreen()}><Icon name="fullscreen" />{fullscreen ? '退出全屏' : '全屏显示'}</button>}
       {error && <p role="status">{error}</p>}
+      {user.status === 'active' && <NotificationSettingsPanel />}
       <details className={shell.help}><summary>操作指南</summary><p><kbd>W A S D</kbd> 行走 · <kbd>Shift</kbd> 跑动<br /><kbd>空格</kbd> 跳跃 · <kbd>E</kbd> 互动<br /><kbd>Alt</kbd> / <kbd>Esc</kbd> 呼出鼠标<br /><kbd>F</kbd> 发消息 · <kbd>V</kbd> 浏览展示</p><p>点击场景或「进入漫游」继续探索。触屏拖动环视，使用方向按钮行走。土地与访客信息可在小镇目录查看。</p></details>
       <button className={shell.logout} disabled={pending} onClick={onLogout}>退出</button>
     </section>}

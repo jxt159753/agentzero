@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor,GroupMemberRole,MessageDto } from '@agentzero/contracts';
+import type { Actor,GroupMemberRole,MessageDto,MessageNotificationDto } from '@agentzero/contracts';
 import type { Tx } from '@agentzero/database';
 import { AppError,audit } from '../../core.js';
 
@@ -54,13 +54,14 @@ export async function conversationBody(tx:Tx,row:ConversationRow) {
   const lastMessage=row.last_message_id===null?null:(await tx.query<MessageDto>(`${messageSelect} WHERE ${row.last_message_id?'m.id=$1':'m.conversation_id=$1'} ORDER BY m.cursor DESC LIMIT 1`,[row.last_message_id??row.id])).rows[0]??null;
   return {id:row.id,kind:row.kind,task_id:row.task_id,title:row.title,created_at:row.created_at,members,last_message:lastMessage};
 }
-export const messageSelect=`SELECT m.id,m.cursor::text,m.conversation_id,m.sender_user_id,m.sender_agent_id,coalesce(a.name,u.display_name) AS sender_name,m.body,m.created_at
+export const messageSelect=`SELECT m.id,m.cursor::text,m.conversation_id,m.sender_user_id,m.sender_agent_id,coalesce(a.name,u.display_name) AS sender_name,m.body,m.created_at,
+  coalesce(m.sender_user_id,a.owner_user_id) AS sender_owner_user_id,c.kind AS conversation_kind,c.task_id
   FROM messages m JOIN conversations c ON c.id=m.conversation_id LEFT JOIN agents a ON a.id=m.sender_agent_id LEFT JOIN users u ON u.id=m.sender_user_id`;
 export async function messagePage(tx:Tx,actor:Actor,query:{after?:string;before?:string;limit?:string},conversationId?:string) {
   if(query.after!==undefined&&query.before!==undefined) throw new AppError('INVALID_REQUEST',400,'不能同时指定前后消息游标');
   const backwards=query.before!==undefined,cursor=query.before??query.after??'0',limit=Number(query.limit??30);
   if(BigInt(cursor)>9223372036854775807n) throw new AppError('INVALID_REQUEST',400,'无效消息游标');
-  const rows=(await tx.query<MessageDto>(`${messageSelect} WHERE ${conversationAccess} AND m.cursor${backwards?'<':'>'}$3::bigint AND ($4::uuid IS NULL OR m.conversation_id=$4) ORDER BY m.cursor ${backwards?'DESC':'ASC'} LIMIT $5`,[...accessParams(actor),cursor,conversationId??null,limit+1])).rows;
+  const rows=(await tx.query<MessageNotificationDto>(`${messageSelect} WHERE ${conversationAccess} AND m.cursor${backwards?'<':'>'}$3::bigint AND ($4::uuid IS NULL OR m.conversation_id=$4) ORDER BY m.cursor ${backwards?'DESC':'ASC'} LIMIT $5`,[...accessParams(actor),cursor,conversationId??null,limit+1])).rows;
   const items=rows.slice(0,limit);
   if(backwards) items.reverse();
   return {items,next_cursor:(backwards?items[0]:items.at(-1))?.cursor??cursor,has_more:rows.length>limit,...(conversationId?{conversation_id:conversationId}:{})};
