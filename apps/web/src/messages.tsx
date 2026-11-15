@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { ConversationDto as Conversation, ConversationMemberDto as ConversationMember, MessagePageDto as MessagePage, MessageRecipientDto as Recipient, MessageUserRecipientDto as UserRecipient } from '@agentzero/contracts';
@@ -8,6 +8,7 @@ import type { Agent, ListResult, Me } from './types';
 import styles from './style.module.css';
 import taskStyles from './tasks.module.css';
 import chat from './messages.module.css';
+import { NotificationBadge, useNotifications } from './notifications';
 
 const latestCursor = '9223372036854775807';
 const timeLabel = (value: string) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(value));
@@ -67,7 +68,7 @@ export function MessagesPage() {
             const title = conversationName(item, me.data?.user.id);
             const represented = item.members.find(member => member.agent_id && member.owner_user_id === me.data?.user.id);
             return <Link key={item.id} className={`${chat.contact} ${item.id === id ? chat.selected : ''}`} aria-current={item.id === id ? 'page' : undefined} to={item.kind === 'task' ? `/tasks/${item.task_id}` : `/messages/${item.id}`}>
-              <Avatar name={title} agent={item.members.some(member => member.agent_id && member.owner_user_id !== me.data?.user.id)} />
+              <span className={chat.contactAvatar}><Avatar name={title} agent={item.members.some(member => member.agent_id && member.owner_user_id !== me.data?.user.id)} /><NotificationBadge conversationId={item.id} /></span>
               <span className={chat.contactText}><span className={chat.contactTitle}><strong>{title}</strong>{item.last_message && <time dateTime={item.last_message.created_at} title={dateTime(item.last_message.created_at)}>{timeLabel(item.last_message.created_at)}</time>}</span><small>{item.last_message ? `${item.last_message.sender_name}：${item.last_message.body}` : '开始聊天吧'}{represented ? ` · 代表 ${represented.name}` : ''}</small></span>
             </Link>;
           })}
@@ -195,6 +196,7 @@ export function TaskDiscussion({ taskId, agentIds }: { taskId: string; agentIds:
 }
 
 function MessageThread({ path, members, agentIds, draft, onDraftChange, draftSender, onSenderChange, sendCommand }: { path: string; members?: Conversation['members']; agentIds?: string[]; draft?: string; onDraftChange?: (value: string) => void; draftSender?: string; onSenderChange?: (value: string) => void; sendCommand?: ReturnType<typeof useCommand> }) {
+  const markRead = useNotifications()?.markRead;
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me') });
   const agents = useQuery({ queryKey: ['agents', 'message-options'], queryFn: () => api<ListResult<Agent>>('/agents?limit=100') });
   const [following, setFollowing] = useState(true);
@@ -213,6 +215,13 @@ function MessageThread({ path, members, agentIds, draft, onDraftChange, draftSen
   const identityCount = ownAgents.length + Number(userCanSend);
   const items = [...new Map(messages.data?.pages.slice().reverse().flatMap(page => page.items).map(item => [item.id, item]) ?? []).values()];
   const firstId = items[0]?.id, lastId = items.at(-1)?.id;
+  const lastMessage = items.at(-1);
+
+  useEffect(() => {
+    const read = () => { if (!document.hidden && following && lastMessage && !messages.isError) markRead?.(lastMessage.conversation_id, lastMessage.cursor); };
+    read(); document.addEventListener('visibilitychange', read);
+    return () => document.removeEventListener('visibilitychange', read);
+  }, [lastMessage?.conversation_id, lastMessage?.cursor, following, messages.isError, markRead]);
 
   useLayoutEffect(() => {
     const element = scroller.current;

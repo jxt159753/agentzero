@@ -95,6 +95,10 @@ describe('phase 3 private conversations and cursor polling',()=>{
     expect(page.statusCode,page.body).toBe(200);expect(page.json().items).toHaveLength(2);
     expect(page.json().items[0].sender_user_id).toBe(alice.actor.userId);
     expect(page.json().items[1].sender_agent_id).toBe(b.id);
+    const notifications=await get(bob,'/api/v1/messages?after=0');
+    expect(notifications.json().items.map((message:{sender_owner_user_id:string;conversation_kind:string;task_id:null})=>[message.sender_owner_user_id,message.conversation_kind,message.task_id])).toEqual([
+      [alice.actor.userId,'direct',null],[bob.actor.userId,'direct',null],
+    ]);
     expect((await post(bob,`/api/v1/conversations/${conversation.id}/messages`,{body:'owner未选择身份'})).statusCode).toBe(403);
     expect((await post(bob,`/api/v1/conversations/${conversation.id}/messages`,{body:'代表Agent',sender_agent_id:b.id})).statusCode).toBe(201);
     for(const other of [outsider,admin,a,sibling]) expect((await get(other,`/api/v1/conversations/${conversation.id}/messages`)).statusCode).toBe(403);
@@ -224,6 +228,7 @@ describe('phase 3 private conversations and cursor polling',()=>{
     expect((await get(alice,`${taskPath}?before=9999999999999999999`)).statusCode).toBe(400);
     await post(alice,taskPath,{body:'task discussion'});
     expect((await get(alice,`${taskPath}?before=9223372036854775807`)).json().items.map((message:{body:string})=>message.body)).toEqual(['task discussion']);
+    expect((await get(alice,'/api/v1/messages?before=9223372036854775807&limit=1')).json().items[0]).toMatchObject({conversation_kind:'task',task_id:taskId,sender_owner_user_id:alice.actor.userId});
   });
 
   it('lists conversations by their last message with exact activity cursors and preserves creation timestamps',async()=>{
